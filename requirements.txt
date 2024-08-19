@@ -1,0 +1,17 @@
+openpyxl
+langchain
+numpy
+pandas
+openai
+langchain_openai
+requests
+langchain-community
+pypdf
+python-dotenv
+faiss-cpu
+pydantic
+ftfy
+fastapi
+fastapi-sessions
+motor
+uvicorn[standard]
