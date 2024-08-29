@@ -1,4 +1,5 @@
 from langchain_openai import ChatOpenAI
+import openai
 import os
 from dotenv import load_dotenv
 
@@ -15,6 +16,11 @@ def generate_router_llm():
         openai_api_key=openai_key
     )
     return llm
+
+# GENERACIÓN DEL MODELO DE LENGUAJE PARA CHEQUEO DE CONSULTAS
+def generate_check_llm():
+    openai.api_key = openai_key
+    return "gpt-4o-mini"
 
 #GENERACIÓN DEL MODELO DE LENGUAJE PARA QA
 def generate_qa_llm():

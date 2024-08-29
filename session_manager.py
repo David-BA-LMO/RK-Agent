@@ -60,10 +60,11 @@ class CustomSessionVerifier(SessionVerifier):
 
     async def verify_session(self, session_id: UUID):
         session = await self.mongo_backend.read(session_id)
-        if not session or datetime.now(timezone.utc) > session.expiration_time:
+        session_expiration_time = session.expiration_time.replace(tzinfo=timezone.utc)
+        if not session or datetime.now(timezone.utc) > session_expiration_time:
             if session:
                 await self.mongo_backend.delete(session_id)
-            return False
+                return False
         return True
 
 

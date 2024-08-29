@@ -1,6 +1,8 @@
 from langchain_core.example_selectors import SemanticSimilarityExampleSelector
+from langchain_community.chat_message_histories import ChatMessageHistory
 from langchain.chains import create_sql_query_chain
 import pandas as pd
+from typing import List
 import sqlite3
 from langchain_openai import OpenAIEmbeddings
 from langchain_community.utilities.sql_database import SQLDatabase
@@ -26,6 +28,7 @@ from src.directories import (
 )
 import os
 from src.config.base_models import generate_qa_llm
+import logging
 
 
 fields_required = ["tipo", "operacion", "poblacion"]
@@ -50,6 +53,7 @@ ANSWER_QUERY_PROMPT = ANSWER_QUERY_PROMPT.format(columns_description = "", input
     # Esta función convierte un diccionario con tipos de datos en forma de string a un diccionario con tipos de datos de Python.
 TABLE_DESCRIPTION = string_to_type(TABLE_DESCRIPTION)
 
+logger = logging.getLogger(__name__)
 
 class QAChain:
 
@@ -61,7 +65,6 @@ class QAChain:
                         f"sqlite:///{database_path}",
                         sample_rows_in_table_info = 0, #Número de filas de ejemplo
                         #custom_table_info = TABLE_DESCRIPTION,
-                        include_tables = ""
                 )
         #context = db.get_context()
         #print(context["table_info"]) #Información de las tablas de la base de datos.
@@ -100,7 +103,7 @@ class QAChain:
 
         #--------------------------------------------------------------------
         # 3 - EJECUCIÓN DE CONSULTA Y FORMATO DE RESPUESTA
-        # Prompt que recoge la la consulta definitiva en formato JSON y la información recuperada de la base de datos
+        # Prompt que recoge la consulta definitiva en formato JSON y la información recuperada de la base de datos
         self.answer_prompt = ChatPromptTemplate.from_template(ANSWER_QUERY_PROMPT)
         # Cadena para presentar la información recuperada de la base de datos
         self.answer_chain = self.answer_prompt | self.llm | StrOutputParser()
@@ -164,11 +167,10 @@ class QAChain:
             return "Lo sentimos, pero no disponemos de momento de ningún inmueble con esas características"
         else:
             return df.iloc[0].to_string()
-
- 
+        
     def get_database_content(self, input):
         if self.new_search:
-            # Este es el caso en el que generamos una nueva búsqueda (new_search = True.
+            # Este es el caso en el que generamos una nueva búsqueda (new_search = True)
             elements = [f"{k}: {v}" for k, v in self.definitive_human_query.items()]
             elements_chain = ", ".join(elements)
             final_human_query = str(elements_chain)
@@ -178,15 +180,13 @@ class QAChain:
         else:
             # Este es el caso en el que ya hemos recuperado la información de la base de datos (new_search = False) y no es necesario ejecutar una nueva búsqueda ni consulta.
             return self.answer_chain.invoke({"input": input, "result": self.query_result})
+    
 
-
-    # Función para comprobar si la salida de la cadena de formateo es correcta. 
-    # Si faltan campos, enruta hacia la cadena que exige al cliente completar esos campos. 
-    # Si está completa redirige a la cadena de generación y ejecución de consultas SQL contra la base de datos
-    def check_query(self, input, history, fields_required=fields_required):
-
-        output = self.format_query_chain.invoke({"input": input, "history": history.messages})
-        history.add_ai_message(str(output))
+    def check_query(self, input, history: List[str], fields_required=fields_required):
+        try:
+            output = self.format_query_chain.invoke({"input": input, "history": history})
+        except Exception as e:
+            logger.info(f"ERROR: 'formatting query' chain failed:", {e})
 
         # "output" es un diccionario que recoge las indicaciones del cliente para luego ser usadas en la consulta a la base de datos.
         # Por optimización, eliminamos todos los valores del diccionario con valores nulos.
@@ -208,17 +208,24 @@ class QAChain:
         
 
 
-    # Función enrutadora según el resultado de la cadena check_new_search_chain.
-    def check_last_query(self, input, history):
-
-        new_search = self.check_new_search_chain.invoke({"input": input, "history": history.messages})
+    # 1º - Función que enruta según el resultado de la cadena check_new_search_chain. 
+    # Básicamente añade un filtro para evitar que se realice nuevas búsquedas cuando no son reclamadas por el usuario
+    def check_last_query(self, input: str, history):
+        try:
+            self.new_search_result = self.check_new_search_chain.invoke({"input": input, "history": history})
+            if self.new_search_result == "True":
+                self.new_search = True
+            else:
+                self.new_search = False
+        except Exception as e:
+            logger.info(f"ERROR: 'checking new search' chain failed:", {e})
         
-        if new_search == "False" and self.need_more_info_for_query == False:
+        if self.new_search == False and self.need_more_info_for_query == False:
             # Si la petición del cliente está relacionado con la consulta realizada previamente y esa consulta ya ha sido completada.
             return self.get_database_content(input)
         else:
             # Entendemos que el cliente reclama una nueva búsqueda o que todavía no se ha completado la consulta. Pasamos a la función que formatea y comprueba la consulta del cliente
-            new_search = True
+            self.new_search = True
             return self.check_query(input, history)
+        
 
-    

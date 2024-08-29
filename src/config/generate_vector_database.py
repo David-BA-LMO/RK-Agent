@@ -4,7 +4,13 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceInstructEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_openai import OpenAIEmbeddings
+import os
+import sys
+current_script_path = os.path.abspath(__file__)
+app_directory_path = os.path.dirname(os.path.dirname(current_script_path))
+sys.path.append(app_directory_path)
 from directories import PDF_dir, DB_DIR
+
 
 
 #-----------------------------------------------------------------------------------------------------

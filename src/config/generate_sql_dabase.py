@@ -1,7 +1,7 @@
 import os
 import pandas as pd
 import sqlite3
-from clean_csv_functions import get_clean_functions
+from src.config.clean_csv_functions import get_clean_functions
 import sys
 
 current_script_path = os.path.abspath(__file__)
@@ -30,17 +30,23 @@ def get_csv_dict(excel_directory):
     csv_dict = {}  # Asegúrate de que este diccionario esté definido
 
     for file in os.listdir(excel_directory):
-        try:
+        for file in os.listdir(excel_directory):
             if file.endswith(".xlsx") or file.endswith(".xls"):
                 name_file = file.rsplit('.', 1)[0]
                 path_excel = os.path.join(excel_directory, file)
-                path_csv = os.path.join(CSV_dir, name_file, name_file + ".csv")
-                excel = pd.read_excel(path_excel, engine='openpyxl')
-                excel.to_csv(path_csv, index=False, encoding='utf-8')
-                csv_dict[name_file] = path_csv  # Almacenamos la ruta del archivo CSV en el diccionario
-                print(f"El archivo excel {name_file}.xls ha sido guardado como CSV en {path_csv}")
+                try:
+                    # Especificar 'encoding' puede no ser necesario para archivos Excel, pero es un buen hábito cuando se manejan archivos CSV o de texto.
+                    excel = pd.read_excel(path_excel, engine='openpyxl')
+                    print(f"Archivo '{file}' leído correctamente.")
+                except Exception as e:
+                    print(f"Error al leer el archivo '{file}': {e}")
+        try:
+            path_csv = os.path.join(CSV_dir, name_file, name_file + ".csv")
+            excel.to_csv(path_csv, index=False, encoding='utf-8')
+            csv_dict[name_file] = path_csv  # Almacenamos la ruta del archivo CSV en el diccionario
+            print(f"El archivo excel {name_file}.xls ha sido guardado como CSV en {path_csv}")
         except Exception as e:
-            print(f"No hay archivos excel en {excel_directory} {e}")
+            print(f"Error al guardar el archivo CSV {name_file}.csv {e}")
     
     return csv_dict
 
@@ -63,7 +69,7 @@ def clean_csv(csv_dict, clean_df_functions, csv_directory):
     for df_name, clean_func in clean_df_functions:
         if df_name in csv_dict:
             # Construir la ruta completa al archivo CSV usando el directorio y el nombre del archivo
-            path = os.path.join(csv_directory, f"{df_name}\{df_name}.csv")
+            path = os.path.join(csv_directory, df_name, df_name+ ".csv")
             # Aplicar la función de limpieza al archivo CSV
             cleaned_df = clean_func(path)
             # Sobrescribir el archivo CSV con el DataFrame limpio

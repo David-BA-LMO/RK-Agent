@@ -4,6 +4,7 @@ services:
 # Contexto de la aplicación
   app:
     build: .
+    image: chatbot:latest
     environment:
       - MONGO_URI=${MONGO_URI} # Indica nombre del servicio mongo, puerto y nombre de la base de datos
       - SECRET_KEY=${SECRET_KEY}  # Clave secreta para JWT
@@ -12,6 +13,8 @@ services:
       - "8000:8000" # Puertas de acceso al contenedor
     depends_on:
       - mongo
+    volumes:
+      - .:/app
 
 # Contexto de la base de datos
   mongo:
@@ -24,6 +27,6 @@ services:
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
-
+      
 volumes:
   mongo_data:
