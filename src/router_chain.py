@@ -1,7 +1,7 @@
 from langchain.prompts import PromptTemplate
 from langchain.chains.router.multi_prompt_prompt import MULTI_PROMPT_ROUTER_TEMPLATE
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.runnables import RunnableLambda
+from langchain_core.runnables import RunnableLambda, RunnableGenerator
 from langchain_community.chat_message_histories import ChatMessageHistory
 from src.utilities import *
 from src.directories import CLASSIFICATION_PROMPT_dir, welcome_message
@@ -23,38 +23,37 @@ class Router_chain:
         self.history = ChatMessageHistory()
         self.history.add_ai_message(welcome_message) #Memoria de mensajes
         self.classification_chain = self.classification_prompt | self.llm | StrOutputParser() #Cadena clasificadora
+        async def call_classification_chain(input_data):
+            return self.classification_chain.invoke(input_data)
+        # Es necesario envolver la función en un RunnableLambda para que RunnableGenerator recoga el resulta de forma no fragmentada
         self.enrouting_chain = {"route": self.classification_chain, "input": lambda x: x["input"], "history": lambda x: x["history"] } | RunnableLambda(self.route) # Cadena de enrutamiento
     
     
     # Esta función es el paso final de la cadena "enrouting_chain"
-    def route(self, info):
+    async def route(self, info):
         try:
             if "búsqueda" in info["route"]:
-                print("Resultado de la clasificación:", info["route"])
-                self.qa_chain.check_last_query(info["input"], info["history"])
+                print("Resultado de la cadena clasificadora:", info["route"])
+                async for mensaje in self.qa_chain.check_last_query(info["input"], info["history"]):
+                    yield mensaje
             elif "información" in info["route"]:
-                print("Resultado de la clasificación:", info["route"])
-                self.rag_chain.query_rag(info["input"])
+                print("Resultado de la cadena clasificadora:", info["route"])
+                yield self.rag_chain.query_rag(info["input"])
             else:
-                print("Resultado de la clasificación:", info["route"])
-                return "Soy un chatbot especializado en búsquedas de inmuebles"
+                print("Resultado de la cadena clasificadora:", info["route"])
+                yield "Soy un chatbot especializado en búsquedas de inmuebles"
+                
         except Exception as e:  
-            logger.info(f"ERROR: enrouting chain failed", {e})
+            logger.info("ERROR: enrouting chain failed")
+            raise Exception(status_code=500, detail=f"ERROR: enrouting chain failed:" + str(e))
 
 
-    def execute_chatbot(self, input):
-        responses = self.enrouting_chain.invoke({"input": input, "history": self.history.messages})
-        if(responses==None):
-           responses = "Lo siento, hubo un problema al procesar tu solicitud."
-        print(responses)
-        #Agregamos historial de mensajes
-        self.history.add_user_message(input)
-        if isinstance(responses, list):
-            for response in responses:
-                self.history.add_ai_message(response)
-            return responses[-1]  # Devolver el último mensaje de respuesta
-        else:
-            self.history.add_ai_message(responses)
-            return responses
+    async def execute_chatbot(self, input: Dict, send_to_client):
+        self.history.add_user_message(input) # Se añade el mensaje del usuario a la memoria
+        # Actualizamos el callback. Debe hacerse en cada llamada de esta función
+        self.qa_chain.set_send_to_client(send_to_client)
+        async for message in self.enrouting_chain.astream({"input": input, "history": self.history.messages}):
+            #self.history.add_ai_message(message) # Se añade la respuesta del chatbot a la memoria
+            yield message
 
 

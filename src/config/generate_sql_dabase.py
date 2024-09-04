@@ -1,14 +1,13 @@
 import os
 import pandas as pd
 import sqlite3
-from src.config.clean_csv_functions import get_clean_functions
 import sys
-
 current_script_path = os.path.abspath(__file__)
 app_directory_path = os.path.dirname(os.path.dirname(current_script_path))
 sys.path.append(app_directory_path)
 from utilities import *
 from directories import EXCEL_dir, CSV_dir, DB_DIR
+from config.clean_csv_functions import get_clean_functions
 
 #-------------------------------------------------------------------------------------------------------------------
 

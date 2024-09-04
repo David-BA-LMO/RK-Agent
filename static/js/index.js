@@ -1,17 +1,20 @@
-
-
 let sessionId = null;
 
         // Función para iniciar la sesión automáticamente
         async function startSession() {
-            //Llamada a la API para iniciar la sesión. /start_session es la ruta definida en el servidor (main.py)
-            const response = await fetch('/start_session', {
-                method: 'POST'
-            });
-            const data = await response.json();
-            sessionId = data.session_id;
-            console.log("Sesión iniciada con ID:", sessionId);
+            try {
+                const response = await fetch('/start_session', {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                sessionId = data.session_id;
+                console.log("Sesión iniciada con ID:", sessionId);
+            } catch (error) {
+                console.error("Error al iniciar la sesión:", error);
+                addMessage("Error al iniciar la sesión", 'bot');
+            }
         }
+
 
         // Función para enviar mensajes
         async function sendMessage() {
@@ -71,12 +74,14 @@ let sessionId = null;
 
             } catch (error) {
                 console.error("Error en la comunicación con la API:", error);
-                addMessage(str(error), 'bot');
+                addMessage(error, 'bot');
             } finally {
                 // Limpiar el campo de entrada
                 document.getElementById("user-input").value = "";
             }
         }
+
+
         // Función para añadir un mensaje al contenedor de chat
         function addMessage(text, sender) {
             const chatContainer = document.getElementById("chat-container");
@@ -85,6 +90,7 @@ let sessionId = null;
             chatContainer.appendChild(messageDiv);
             scrollToBottom(); // Desplazarse al final del contenedor
         }
+
 
         // Función para crear el elemento de mensaje
         function createMessageElement(sender) {
@@ -95,11 +101,13 @@ let sessionId = null;
             return messageDiv;
         }
 
+
         // Función para desplazarse al final del contenedor de chat
         function scrollToBottom() {
             const chatContainer = document.getElementById("chat-container");
             chatContainer.scrollTop = chatContainer.scrollHeight;
         }
+
 
         // Función para obtener el mensaje de bienvenida del servidor
         async function fetchWelcomeMessage() {
@@ -116,11 +124,13 @@ let sessionId = null;
             }
         }
 
+
         // Función para iniciar la sesión del chatbot
         async function initiateSession() {
             await startSession()
             await fetchWelcomeMessage(); // Cargar y mostrar el mensaje de bienvenida
         }
+
 
         // Iniciar sesión cuando la página se carga
         document.addEventListener('DOMContentLoaded', initiateSession);

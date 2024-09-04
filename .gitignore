@@ -1,14 +1,17 @@
 data/
 database/
 prompts/
+logs/
 src/utilities.py
 src/directories.py
 src/api_consume.py
+src/text2sql.py
 src/config/clean_csv_functions.py
 src/config/csv_functions.py
 __pycache__/
 .env
 app.log
+.gitignore
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

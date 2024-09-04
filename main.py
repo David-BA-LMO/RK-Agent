@@ -14,7 +14,7 @@ from pathlib import Path
 import logging
 import asyncio
 from logging.handlers import RotatingFileHandler
-from src.directories import welcome_message
+from src.directories import welcome_message, db_search_callback
 
 
  # Modelo de datos JSON que recibe _chat() y _end_session()
@@ -23,9 +23,8 @@ class ChatRequest(BaseModel):
     session_id: UUID4
 
 
-
 # Configuración del logger con rotación (limitados). 20000 bytes y 5 archivos de respaldo máximos
-file_handler  = RotatingFileHandler('app.log', maxBytes=20000, backupCount=1)
+file_handler  = RotatingFileHandler('logs/app.log', maxBytes=20000, backupCount=1)
 # Configura el handler para la consola
 console_handler = logging.StreamHandler()
 logging.basicConfig(handlers=[file_handler, console_handler], level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -123,11 +122,10 @@ class MainApp:
     #------MANEJO DE INTERACCIÓNES USUARIO-CHATBOT------
     # Utiliza la cookie del cliente para identificar la sesión
     async def _chat(self, response: Response, user_input: str, session_id: UUID):
-
         # Verificar si la sesión existe en la colección de sesiones del backend de MongoDB
         session = await self.mongo_backend.read(str(session_id)) # Se obtiene la sesión con el ID proporcionado
         if not session:
-            logger.info("ERROR: Session not found" + {str(e)})
+            logger.info("ERROR: Session not found")
             raise HTTPException(status_code=404, detail="Session not found")
         else:
             logger.info("Session verified with id: " + str(session_id))
@@ -135,42 +133,43 @@ class MainApp:
         # Recuperar la instancia de Router_chain, que contiene las cadenas de enrutamiento del chatbot
         router_chain = self.session_router_chain.get(str(session_id))
         if not router_chain:
-            logger.info("ERROR: Session logic not found:" + {str(e)})
+            logger.info("ERROR: Session logic not found:")
             raise HTTPException(status_code=500, detail="Session logic not found")
         else:
             logger.info("Session logic found with id: " + str(session_id))
 
-        # EJECUCIÓN DEL CHATBOT
-        chatbot_response = None
-        try:
-            chatbot_response = router_chain.execute_chatbot(user_input) 
-        except Exception as e:
-            logger.info("ERROR: Logic execute failed", {e})
-            raise HTTPException(status_code=500, detail="Logic failed: " + str(e))
-        
-        # Actualización de la sesión
-        try:
-            conversation_entry = {"user": user_input, "bot": chatbot_response, "timestamp": datetime.now(timezone.utc)}
-            # Dentro del objeto de datos de la sesión, se añade la conversación. Cada entrada es un diccionario con el mensaje del usuario, la respuesta del chatbot y la marca de tiempo
-            session.data["conversation"].append(conversation_entry)
-            # Se actualiza el instante de la última interacción
-            session.last_active = datetime.now(timezone.utc)
-            session.expiration_time = session.last_active + self.session_timeout
-            await self.mongo_backend.update(str(session_id), session)
-        except Exception as e:
-            logger.info("ERROR: Session update failed", {e})
-            raise HTTPException(status_code=500, detail="Session update failed: " + str(e))
-
-        # Función de generador para enviar la respuesta secuencialmente
         async def response_stream():
-            # Iterar sobre la respuesta en pasos de dos caracteres
-            for i in range(0, len(chatbot_response), 2):
-                # Obtener un par de caracteres
-                chunk = chatbot_response[i:i+2]
-                # Enviar el par de caracteres seguido de un espacio
-                yield chunk + ' '
-                # Simular la pausa entre envíos
-                await asyncio.sleep(0.1)
+            chatbot_response = ""
+
+            # Función callback que pasamos al cliente para posibles mensajes intermedios. Es necesario la inyección cada vez que se genera una llamada a _chat()
+            async def send_to_client(message):
+                yield message    
+
+            try:
+                # Generación la respuesta del chatbot. Es posible que en cada llamada se generen múltiples mensajes
+                async for partial_response in router_chain.execute_chatbot(user_input, send_to_client):
+                    # Trocear la respuesta en chunks de 3 caracteres para simular una respuesta en tiempo real
+                    for i in range(0, len(partial_response), 3):
+                        chunk = partial_response[i:i+3]
+                        yield chunk
+                        await asyncio.sleep(0.1) # Tiempo de espera entre cada chunk del mensaje
+            except Exception as e:
+                logger.info("ERROR: Logic execute failed", {e})
+                yield "ERROR: Logic failed: " + str(e)
+            
+            # REVISAR ESTO PARA AÑADIR LA CONVERSACIÓN A LA SESIÓN
+            # Actualización de la sesión después de completar la generación de la respuesta
+            try:
+                conversation_entry = {"user": user_input, "bot": chatbot_response, "timestamp": datetime.now(timezone.utc)}
+                # Dentro del objeto de datos de la sesión, se añade la conversación. Cada entrada es un diccionario con el mensaje del usuario, la respuesta del chatbot y la marca de tiempo
+                session.data["conversation"].append(conversation_entry)
+                # Se actualiza el instante de la última interacción
+                session.last_active = datetime.now(timezone.utc)
+                session.expiration_time = session.last_active + self.session_timeout
+                await self.mongo_backend.update(str(session_id), session)
+            except Exception as e:
+                logger.info("ERROR: Session update failed", {e})
+                yield "ERROR: Session update failed: " + str(e)
 
         return StreamingResponse(response_stream(), media_type="text/plain")
 

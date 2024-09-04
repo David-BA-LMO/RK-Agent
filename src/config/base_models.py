@@ -19,13 +19,17 @@ def generate_router_llm():
 
 # GENERACIÓN DEL MODELO DE LENGUAJE PARA CHEQUEO DE CONSULTAS
 def generate_check_llm():
-    openai.api_key = openai_key
-    return "gpt-4o-mini"
+    llm = ChatOpenAI(
+        model="gpt-4", 
+        temperature = 0,
+        openai_api_key=openai_key
+    )
+    return llm
 
 #GENERACIÓN DEL MODELO DE LENGUAJE PARA QA
 def generate_qa_llm():
     llm = ChatOpenAI(
-        model="gpt-4-turbo-2024-04-09", 
+        model="gpt-4o", 
         temperature = 0,
         openai_api_key=openai_key
     )
