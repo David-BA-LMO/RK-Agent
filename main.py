@@ -12,9 +12,8 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 import logging
-import asyncio
 from logging.handlers import RotatingFileHandler
-from src.directories import welcome_message, db_search_callback
+from src.directories import welcome_message
 
 
  # Modelo de datos JSON que recibe _chat() y _end_session()
@@ -138,38 +137,32 @@ class MainApp:
         else:
             logger.info("Session logic found with id: " + str(session_id))
 
+        # Generador de respuestas del chatbot en tiempo real
+        chatbot_response = ""
         async def response_stream():
-            chatbot_response = ""
-
-            # Función callback que pasamos al cliente para posibles mensajes intermedios. Es necesario la inyección cada vez que se genera una llamada a _chat()
-            async def send_to_client(message):
-                yield message    
-
             try:
+                nonlocal chatbot_response
                 # Generación la respuesta del chatbot. Es posible que en cada llamada se generen múltiples mensajes
-                async for partial_response in router_chain.execute_chatbot(user_input, send_to_client):
-                    # Trocear la respuesta en chunks de 3 caracteres para simular una respuesta en tiempo real
-                    for i in range(0, len(partial_response), 3):
-                        chunk = partial_response[i:i+3]
-                        yield chunk
-                        await asyncio.sleep(0.1) # Tiempo de espera entre cada chunk del mensaje
+                async for partial_response in router_chain.execute_chatbot(user_input):
+                    yield partial_response
+                    chatbot_response += partial_response
+                    logger.info("PARTIAL RESPONSE: " + partial_response)
             except Exception as e:
                 logger.info("ERROR: Logic execute failed", {e})
                 yield "ERROR: Logic failed: " + str(e)
             
-            # REVISAR ESTO PARA AÑADIR LA CONVERSACIÓN A LA SESIÓN
-            # Actualización de la sesión después de completar la generación de la respuesta
-            try:
-                conversation_entry = {"user": user_input, "bot": chatbot_response, "timestamp": datetime.now(timezone.utc)}
-                # Dentro del objeto de datos de la sesión, se añade la conversación. Cada entrada es un diccionario con el mensaje del usuario, la respuesta del chatbot y la marca de tiempo
-                session.data["conversation"].append(conversation_entry)
-                # Se actualiza el instante de la última interacción
-                session.last_active = datetime.now(timezone.utc)
-                session.expiration_time = session.last_active + self.session_timeout
-                await self.mongo_backend.update(str(session_id), session)
-            except Exception as e:
-                logger.info("ERROR: Session update failed", {e})
-                yield "ERROR: Session update failed: " + str(e)
+        # Actualización de la sesión después de completar la generación de la respuesta
+        try:
+            # Dentro del objeto de datos de la sesión, se añade la conversación. Cada entrada es un diccionario con el mensaje del usuario, la respuesta del chatbot y la marca de tiempo
+            conversation_entry = {"user": user_input, "bot": chatbot_response, "timestamp": datetime.now(timezone.utc)}
+            session.data["conversation"].append(conversation_entry)
+            # Se actualiza el instante de la última interacción
+            session.last_active = datetime.now(timezone.utc)
+            session.expiration_time = session.last_active + self.session_timeout
+            await self.mongo_backend.update(str(session_id), session)
+        except Exception as e:
+            logger.info("ERROR: Session update failed", {e})
+            return "ERROR: Session update failed: " + str(e)    
 
         return StreamingResponse(response_stream(), media_type="text/plain")
 

@@ -1,19 +1,18 @@
 body {
-    font-family: Arial, sans-serif;
     background-color: #f7f7f7;
     margin: 0;
     padding: 0;
     display: flex;
-    justify-content: center; /* Centra el contenedor principal horizontalmente */
-    align-items: center; /* Centra el contenedor principal verticalmente */
+    justify-content: center;
+    align-items: center;
     height: 100vh;
 }
 
 /* Estilos para el contenedor principal */
 #main-container {
-    width: 100%; /* Por defecto, ocupa el 100% del ancho */
-    max-width: 100%; /* Evita que crezca más que el ancho de la pantalla */
-    height: 100%; /* Ocupa toda la altura de la pantalla */
+    width: 100%; 
+    max-width: 100%;
+    height: 100%; 
     display: flex;
     flex-direction: column;
     box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
@@ -22,35 +21,58 @@ body {
 /* Estilos específicos para pantallas más grandes (escritorio) */
 @media (min-width: 768px) {
     #main-container {
-        width: 60%; /* Ocupa el 60% del ancho en pantallas más grandes */
-        max-width: 60%; /* Limita el ancho máximo al 60% del contenedor */
-        border-radius: 10px; /* Añade bordes redondeados */
-        overflow: hidden; /* Evita que los bordes redondeados sean visibles con el contenido */
+        width: 60%; 
+        max-width: 60%; 
+        border-radius: 10px; 
+        overflow: hidden;
     }
 }
 
+
+/*------CHAT------*/
 #chat-container {
     flex-grow: 1;
     overflow-y: auto;
     padding: 20px;
-    background-color: white;
+    flex-direction: column;
+    display: flex;
 }
 
 #chat-container .message {
-    margin-bottom: 15px;
-    padding: 10px;
-    border-radius: 5px;
+    margin-bottom: 20px;
+    font-size: 13px;
+    font-family: 'Arial', sans-serif;
+    line-height: 2;
+    color:rgb(74, 74, 74);
+    clear: both;
+    display: flex; 
+    text-align: left;
 }
 
 #chat-container .message.user {
-    background-color: #e0f7fa;
-    text-align: right;
+    background-color: #cad7e3;
+    padding-left: 16px;
+    padding-right: 16px; 
+    padding-top: 6px;  
+    padding-bottom: 6px;
+    max-width: 60%;
+    border-radius: 20px;
+    box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.1);
+    font-weight: 400;
+    align-self: flex-end;
+    margin-left: auto;
 }
 
+#chat-container .message.welcome,
 #chat-container .message.bot {
-    background-color: #ffeb3b;
+    background-color: transparent;
+    font-weight: 400;
+    clear: both;
+    display: block;
 }
 
+
+/*------INPUT------*/
 #input-container {
     display: flex;
     padding: 20px;
@@ -74,30 +96,74 @@ body {
     border-radius: 5px;
     cursor: pointer;
 }
-.spinner {
+
+
+/*------ANIMACIÓN DE CARGA------*/
+/* Estilo para el texto */
+#loading-div {
     display: flex;
+    flex-direction: column; 
+    align-items: center; 
     justify-content: center;
-    align-items: center;
+    gap: 10px; 
+    font-weight: bold;
+    color: #333;
+    margin: 10px 0;
+}
+
+/* Estilo para el spinner */
+    #loading-spinner {
+        width: 60px;
+        height: 60px;
+        border-radius: 50%;
+        position: relative;
+        animation: rotate 1s linear infinite
+      }
+      #loading-spinner::before , #loading-spinner::after {
+        content: "";
+        box-sizing: border-box;
+
+        position: absolute;
+        inset: 0px;
+        border-radius: 50%;
+        border: 5px solid #85ebff;
+        animation: prixClipFix 2s linear infinite ;
+      }
+      #loading-spinner::after{
+        border-color: #1c718e;
+        animation: prixClipFix 2s linear infinite , rotate 0.5s linear infinite reverse;
+        inset: 6px;
+      }
+
+      @keyframes rotate {
+        0%   {transform: rotate(0deg)}
+        100%   {transform: rotate(360deg)}
+      }
+
+      @keyframes prixClipFix {
+          0%   {clip-path:polygon(50% 50%,0 0,0 0,0 0,0 0,0 0)}
+          25%  {clip-path:polygon(50% 50%,0 0,100% 0,100% 0,100% 0,100% 0)}
+          50%  {clip-path:polygon(50% 50%,0 0,100% 0,100% 100%,100% 100%,100% 100%)}
+          75%  {clip-path:polygon(50% 50%,0 0,100% 0,100% 100%,0 100%,0 100%)}
+          100% {clip-path:polygon(50% 50%,0 0,100% 0,100% 100%,0 100%,0 0)}
+      }
+
+
+/*------CONTENEDOR DE RESPUESTA DEL BOT------*/
+/* Contenedor del logo del bot */
+.bot-logo-container {
+    margin-right: 10px; /* Espacio entre el logo y el mensaje */
+}
+
+/* Imagen del logo del bot */
+.bot-logo {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+}
+
+/* Contenedor del texto del bot */
+.bot-message-content {
+    display: flex;
     flex-direction: column;
-    position: fixed;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    z-index: 1000;
-    background: rgba(255, 255, 255, 0.8);
-    padding: 20px;
-    border-radius: 10px;
-}
-
-.spinner-border {
-    width: 3rem;
-    height: 3rem;
-    border-width: 0.3rem;
-    animation: spinner-border 0.75s linear infinite;
-}
-
-@keyframes spinner-border {
-    100% {
-        transform: rotate(360deg);
-    }
 }
