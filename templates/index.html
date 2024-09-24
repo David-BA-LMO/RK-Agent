@@ -13,7 +13,7 @@
         </div>
         <div id="input-container">
             <input type="text" id="user-input" placeholder="Escribe tu mensaje...">
-            <button onclick="sendMessage()">Enviar</button>
+            <button onclick="sendMessage(document.getElementById('user-input').value)">Enviar</button>
         </div>
     </div>
     <script src="/static/js/index.js"></script>

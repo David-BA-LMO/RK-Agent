@@ -95,7 +95,7 @@ def create_ddbb_path(csv_dict):
     for name_db, csv_path in csv_dict.items():
         # Construir la ruta de la base de datos
         database_path = os.path.join(DB_DIR, f"{name_db}.db")
-        db_dict[name_db] = f"sqlite:///{database_path}" #SQLite no requiere autentificación
+        db_dict[name_db] = f"sqlite:///{database_path}"  # SQLite no requiere autenticación
         
         # Leer el archivo CSV en un DataFrame de pandas
         df = pd.read_csv(csv_path)
@@ -105,6 +105,12 @@ def create_ddbb_path(csv_dict):
         
         # Guardar el DataFrame en la base de datos como una tabla
         df.to_sql(name_db, conn, if_exists='replace', index=False)
+        
+        # Optimización: Compactar la base de datos
+        conn.execute("VACUUM;")
+        
+        # Deshabilitar journaling si la base de datos será solo lectura
+        conn.execute("PRAGMA journal_mode = OFF;")
         
         # Cerrar la conexión
         conn.close()

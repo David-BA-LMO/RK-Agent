@@ -2,16 +2,22 @@ from pydantic import BaseModel
 from datetime import datetime, timezone
 from fastapi_sessions.session_verifier import SessionVerifier
 from fastapi_sessions.backends.session_backend import SessionBackend
+from starlette.middleware.base import BaseHTTPMiddleware
 from uuid import UUID
-from fastapi import HTTPException
+from typing import List, Optional, Dict
+from fastapi import HTTPException, Request, Response
 from fastapi import Response
 from datetime import datetime
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 # Clase Backend de sesión para almacenar y recuperar datos de sesión. Todos las instancias de objetos de sesión deben ser subclases de BaseModel
 class SessionData(BaseModel):
     session_id: str
-    data: dict # Almacena las conversaciones
+    history: Optional[List[Dict]] = [] # Almacena las conversaciones
+    qa_data: Optional[Dict] = [] # Almacena las propiedades de sesión en la herramienta QA incluidos los pares input-SQL
     last_active: datetime # Marca de tiempo de la última interacción
     expiration_time: datetime  # Marca de tiempo de expiración de la sesión
 
@@ -21,11 +27,11 @@ class MongoDBBackend(SessionBackend):
     def __init__(self, collection):
         self.collection = collection
     # Métodos CRUD para sesiones
-    async def create(self, session_id: UUID, data: SessionData):
+    async def create(self, data: SessionData):
         try:
             await self.collection.insert_one(data.model_dump())
         except Exception as e:
-            print(f"Error al crear la sesión: {e}")
+            logger.error(f"ERROR: cannot creat session: {e}")
             raise HTTPException(status_code=500, detail="Internal Server Error")
 
     async def read(self, session_id: UUID) -> SessionData:
@@ -35,22 +41,30 @@ class MongoDBBackend(SessionBackend):
                 return SessionData(**result)
             return None
         except Exception as e:
-            print(f"Error al leer la sesión: {e}")
+            logger.error(f"ERROR: cannot read session: {e}")
             raise HTTPException(status_code=500, detail="Internal Server Error")
 
     async def update(self, session_id: UUID, data: SessionData):
         try:
             await self.collection.update_one({"session_id": str(session_id)}, {"$set": data.model_dump()})
         except Exception as e:
-            print(f"Error al actualizar la sesión: {e}")
+            logger.error(f"ERROR: cannot update session: {e}")
             raise HTTPException(status_code=500, detail="Internal Server Error")
 
     async def delete(self, session_id: UUID):
         try:
             await self.collection.delete_one({"session_id": str(session_id)})
         except Exception as e:
-            print(f"Error al eliminar la sesión: {e}")
+            logger.error(f"ERROR: cannot remove session: {e}")
             raise HTTPException(status_code=500, detail="Internal Server Error")
+    
+    def ensure_ttl_index(self):
+        try:
+            # Crea un índice en expiration_time con un TTL de 0 segundos.
+            self.collection.create_index("expiration_time", expireAfterSeconds=0)
+        except Exception as e:
+            logger.error(f"ERROR: cannot create TTL index: {e}")
+            raise HTTPException(status_code=500, detail="Error al configurar índice TTL")
 
 
 # Clase personalizada de SessionVerifier para verificar la sesión
@@ -79,19 +93,66 @@ class CookieBackend:
         try:
             response.set_cookie(key=self.cookie_name, value=str(session_id), httponly=True)
         except Exception as e:
-            print(f"Error al escribir la cookie: {e}")
+            logger.error(f"ERROR: cannot write cookie: {e}")
             raise HTTPException(status_code=404, detail="Session not found or expired")
 
     def read(self, request) -> UUID:
         try: 
             return UUID(request.cookies.get(self.cookie_name))
         except Exception as e:
-            print(f"Error al leer la cookie: {e}")
+            logger.error(f"ERROR: cannot read cookie: {e}")
             raise HTTPException(status_code=404, detail="Session not found or expired")
 
     def delete(self, response: Response):
         try:
             response.delete_cookie(self.cookie_name)
         except Exception as e:
-            print(f"Error al eliminar la cookie: {e}")
+            logger.error(f"ERROR: cannot remove cookie: {e}")
             raise HTTPException(status_code=404, detail="Session not found or expired")
+        
+
+# Cada vez que una solicitud HTTP llega a la aplicación, este middleware utiliza la cookie id_session para localizar la sesión en el backend.
+class SessionMiddleware(BaseHTTPMiddleware):
+    def __init__(self, app, mongo_backend, cookie_backend, session_timeout):
+        super().__init__(app)
+        self.mongo_backend = mongo_backend
+        self.cookie_backend = cookie_backend
+        self.session_timeout = session_timeout
+
+    async def dispatch(self, request: Request, call_next):
+
+        # Inicializar request.state.session
+        request.state.session = None
+
+        # Rutas que no deben requerir autenticación o sesión
+        excluded_paths = ["/static", "/templates", "/"]
+        if any(request.url.path.startswith(path) for path in excluded_paths):
+            return await call_next(request)
+        
+        session_id = request.cookies.get("session_id")  # Acceso a la cookie de sesión
+
+        logger.info("Retrive session from backend with id:" + str(session_id))
+
+        if session_id:
+            # Verificar y cargar la sesión desde MongoDB
+            session = await self.mongo_backend.read(session_id)
+            logger.info("ID DE SESSIÓN EN LA SESIÓN RECUPERADA: "+session.session_id)
+            if session:
+                # Verificar si la sesión ha expirado
+                if session.expiration_time < datetime.now(timezone.utc):
+                    await self.mongo_backend.delete(session_id)
+                    response = Response("Session expired", status_code=401)
+                    self.cookie_backend.delete(response)
+                    return response
+
+                # Asignar la sesión al request.state
+                request.state.session = session
+            else:
+                logger.error("ERROR: Session not found in session backend or session backend is down")
+                return Response("Session not found", status_code=404)
+        else:
+            logger.error("ERROR: session_id not found in cookies")
+            return Response("Session not found", status_code=401)
+
+        response = await call_next(request)
+        return response

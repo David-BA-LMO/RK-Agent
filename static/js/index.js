@@ -1,4 +1,7 @@
 let sessionId = null;
+let message_is_finish = true
+let accumulatedMessage = "";  // Variable para acumular los fragmentos de texto.
+let partialTag = "";  // Para manejar las etiquetas HTML incompletas.
 
 // Lista de mensajes especiales que requieren un comportamiento específico
 const specialTags = {
@@ -38,7 +41,16 @@ function handleLoadingDbEnd() {
 }
 
 
-// --------------------- FUNCIONALIDAD DE LOS ENLACES ---------------------
+// --------------------- ENVÍO DEL MENSAJE CON ENTER ---------------------
+document.getElementById('user-input').addEventListener('keydown', function(event) {
+    const input = document.getElementById('user-input').value;
+    if (event.key === 'Enter' && input.trim() !== '' && message_is_finish) {
+        sendMessage(input);
+    }
+});
+
+
+// --------------------- AGREGAR ELEMENTO ENLACE ---------------------
 // Función para devolver un enlace html a partir de una URL
 function createUrlLink(url) {
     const link = document.createElement('a');
@@ -57,8 +69,7 @@ async function startSession() {
             method: 'POST'
         });
         const data = await response.json();
-        sessionId = data.session_id;
-        console.log("Sesión iniciada con ID:", sessionId);
+        sessionId = data.session_id;  // Guardamos el session_id pasado al crear la sesión
     } catch (error) {
         console.error("Error al iniciar la sesión:", error);
         addMessage("Error al iniciar la sesión", 'bot');
@@ -66,29 +77,28 @@ async function startSession() {
 }
 
 // ENVÍO Y RECEPCIÓN DE MENSAJES
-async function sendMessage() {
+async function sendMessage(userInput) {
+    message_is_finish = false;
 
     if (!sessionId) {
         console.error("Session ID is missing.");
         return;
     }
 
-    // Recoge el input del cliente y comprueba si está vacío
-    const userInput = document.getElementById("user-input").value;
     if (userInput.trim() === "") return;
 
-    // Añadir el mensaje del usuario al contenedor de chat
-    let is_new_message = true; // Variable para controlar si se ha creado un nuevo contenedor de mensajes
-    addMessage(userInput, 'user', is_new_message); 
+    document.getElementById("user-input").value = "";
 
-    // Llamada a la API para enviar el mensaje del usuario. /chat es la ruta definida en el servidor (main.py)
+    let is_new_message = true;
+    addMessage(userInput, 'user', is_new_message);
+
     try {
         response = await fetch('/chat', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify({ user_input: userInput, session_id: sessionId }),
+            body: JSON.stringify({user_input: userInput}),
         });
 
         if (!response.ok) {
@@ -96,118 +106,105 @@ async function sendMessage() {
             console.error("ERROR: API response error", errorData.detail);
             return;
         }
-        
-        // Leer la respuesta de la API como un stream
+
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
 
-        // Leer el stream de datos progresivamente. Este bucle se mantiene mientras sigan llegando mensajes del backend
         while (true) {
-            const {done, value} = await reader.read();
+            const { done, value } = await reader.read();
             if (done) break;
 
-            // Decodificar la respuesta del stream
             let chunk = decoder.decode(value, { stream: true });
-            console.log("CHUNK:", chunk);
+            console.log("CHUNK: "+chunk)
 
-            // Verificar si hay tags especiales y eliminarlos del chunk
+            // Verificar y ejecutar comandos especiales
             const specialTagKeys = Object.keys(specialTags);
-            let remainingChunk = chunk;
-
             specialTagKeys.forEach(tag => {
-                if (remainingChunk.includes(tag)) {
-                    // Ejecutar la función asociada al tag especial
-                    specialTags[tag]();
-            
-                    // Eliminar todas las ocurrencias del tag en el chunk
-                    remainingChunk = remainingChunk.split(tag).join('');
+                if (chunk.includes(tag)) {
+                    specialTags[tag]();  // Ejecutar la función asociada al comando
+                    chunk = chunk.split(tag).join('');  // Eliminar el comando del chunk
                 }
             });
 
-             // Verificar si el chunk contiene una URL
-            const urlPattern = /(https?:\/\/[^\s]+)/g;
-            const chunkParts = remainingChunk.split(urlPattern);
-            is_new_message = true 
-            
+            is_new_message = true;
+
+            // Procesar el texto restante después de eliminar comandos especiales
+            const chunkParts = chunk.split(/(<[^>]*>|[^<]+)/); // Separar contenido HTML y texto
             for (const part of chunkParts) {
-                if (urlPattern.test(part)) {
-                    // Si el fragmento es una URL, se llama a la función para crear el enlace
-                    link = createUrlLink(part);
-                    addMessage(link, "bot", is_new_message)
-                    addMessage("br", "bot", is_new_message);
-                    addMessage("br", "bot", is_new_message);
-                    is_new_message = false; 
-                } else {
-                    // Aquí se procesa cada respuesta parcial que no tenga un trato especial (que sea simple texto) generando un flujo de texto
-                    const textParts = part.match(/.{1,3}/g) || []; //Fragmentamos el texto restante en partes de 3 caracteres
-                    for (const textPart of textParts) {
-                        if (textPart.trim() !== "") {
-                            addMessage(textPart, "bot", is_new_message);
-                            is_new_message = false; 
-                            // Simular un pequeño retraso para el efecto de flujo
-                            await new Promise(resolve => setTimeout(resolve, 20));
-                        }
+                const textParts = part.match(/.{1,3}/g) || []; // Fragmentamos en partes de 3 caracteres
+
+                for (const textPart of textParts) {
+                    partialTag += textPart;
+
+                    // Intentar parsear para ver si tenemos un HTML válido
+                    const tempDiv = document.createElement('div');
+                    tempDiv.innerHTML = partialTag;
+
+                    if (tempDiv.innerHTML !== partialTag) {
+                        // El HTML no es válido todavía, seguimos acumulando
+                        continue;
                     }
-                    if (textParts.some(tp => tp.trim() !== "")) {
-                        addMessage("br", "bot", is_new_message);
-                        addMessage("br", "bot", is_new_message);
+
+                    // HTML completo, agregar el mensaje
+                    accumulatedMessage += partialTag;
+                    partialTag = "";  // Limpiar la acumulación
+
+                    addMessage(accumulatedMessage, "bot", is_new_message);
+                    accumulatedMessage = "";  // Limpiar mensaje acumulado
+
+                    await new Promise(resolve => setTimeout(resolve, 20)); // Efecto de flujo
+
+                    if (is_new_message) {
+                        is_new_message = false;
                     }
                 }
             }
-            is_new_message = true
+
+            if (partialTag.trim() !== "") {
+                accumulatedMessage += partialTag;
+                addMessage(accumulatedMessage, "bot", is_new_message);
+                partialTag = "";
+            }
+
+            is_new_message = true;
+            message_is_finish = true;
         }
     } catch (error) {
         console.error("Error en la comunicación con la API:", error);
         addMessage(error, 'bot');
-    } finally {
-        // Limpiar el campo de entrada
-        document.getElementById("user-input").value = "";
     }
 }
 
-
-// CREAR CONTENEDOR DE MENSAJES
-// Esta función crea un nuevo contenedor de mensajes y si ya se ha creado añade nuevos mensajes sin sobreescribir los anteriores
 function addMessage(content, sender, is_new_message = true) {
     let messageDiv = null;
     const chatContainer = document.getElementById("chat-container");
 
     if (is_new_message) {
         if (sender === "bot" || sender === "welcome") {
-            // Llamamos a la función para crear la estructura del mensaje del chatbot
             messageDiv = createBotMessageContainer(sender);
         } else {
-            // Crear un nuevo contenedor de mensaje si es el usuario u otro remitente
             messageDiv = document.createElement("div");
             messageDiv.classList.add("message", sender);
         }
         chatContainer.appendChild(messageDiv);
     } else {
-        // Seleccionar el último contenedor de mensajes del mismo remitente
         const allMessages = chatContainer.querySelectorAll(".message." + sender);
         messageDiv = allMessages[allMessages.length - 1];
     }
 
-    // Si el remitente es el bot, añadir el contenido al sub-div "bot-message-content"
     let targetDiv = messageDiv;
     if (sender === "bot" || sender === "welcome") {
         targetDiv = messageDiv.querySelector(".bot-message-content");
     }
 
-    // Si el contenido es un elemento HTML, lo añadimos directamente
-    if (content instanceof HTMLElement) {
-        targetDiv.appendChild(content);
-    } else if (content === "br") {
-        // Añadir un salto de línea si el contenido es "br"
-        const lineBreak = document.createElement("br");
-        targetDiv.appendChild(lineBreak);
+    if (/<\/?[a-z][\s\S]*>/i.test(content)) {
+        targetDiv.insertAdjacentHTML('beforeend', content);
     } else {
-        // Si es texto, crear un nodo de texto
         const textNode = document.createTextNode(content);
         targetDiv.appendChild(textNode);
     }
-    
-    scrollToBottom(); // Desplazarse al final del contenedor
+
+    scrollToBottom();
 }
 
 
