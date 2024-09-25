@@ -26,25 +26,25 @@ class Router_chain:
         self.welcome_document = txt_to_str(welcome_dir)
         self.PRESENTATION_PROMPT = txt_to_str(PRESENTATION_PROMPT_dir)
         self.presentation_prompt = PromptTemplate.from_template(self.PRESENTATION_PROMPT)
-        self.generic_chain = self.presentation_prompt | self.llm | StrOutputParser()
+        self.presentation_chain = self.presentation_prompt | self.llm | StrOutputParser()
     
 
     async def execute(self, input: str, session: SessionData) -> AsyncGenerator[str, None]:
         
-        history = self.get_conversation_history(session.data, 6) # Accedemos al hitorial de conversación
+        history = self.get_conversation_history(session.history, 4) # Accedemos al historial de conversación
 
         # Cadena enrutadora
         result = await self.classification_chain.ainvoke({"input": input, "history": history})
 
-        if result.equals("búsqueda"):
+        if result == "búsqueda":
             async for message in self.qa_chain.execute(input, history, session): # Herramienta Text2SQL
                 yield message
-        elif result.equals("información"):
-            answer = await self.rag_chain.query_rag(input, history, session) # Herramienta RAG
-            yield answer
+        elif result == "información":
+            async for message in self.rag_chain.query_rag(input, history): # Herramienta RAG
+                yield message
         else:
-            answer =  await self.generic_chain.ainvoke({"input": input, "welcome": self.welcome_document})
-            yield answer
+            async for message in self.presentation_chain.astream({"input": input, "welcome": self.welcome_document}):
+                yield message
 
     
     # Esta función recupera el historial de mensages de la sesión

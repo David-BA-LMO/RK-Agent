@@ -31,7 +31,7 @@ class MongoDBBackend(SessionBackend):
         try:
             await self.collection.insert_one(data.model_dump())
         except Exception as e:
-            logger.error(f"ERROR: cannot creat session: {e}")
+            logger.error(f"Cannot creat session: {e}")
             raise HTTPException(status_code=500, detail="Internal Server Error")
 
     async def read(self, session_id: UUID) -> SessionData:
@@ -41,21 +41,21 @@ class MongoDBBackend(SessionBackend):
                 return SessionData(**result)
             return None
         except Exception as e:
-            logger.error(f"ERROR: cannot read session: {e}")
+            logger.error(f"Cannot read session: {e}")
             raise HTTPException(status_code=500, detail="Internal Server Error")
 
     async def update(self, session_id: UUID, data: SessionData):
         try:
             await self.collection.update_one({"session_id": str(session_id)}, {"$set": data.model_dump()})
         except Exception as e:
-            logger.error(f"ERROR: cannot update session: {e}")
+            logger.error(f"Cannot update session: {e}")
             raise HTTPException(status_code=500, detail="Internal Server Error")
 
     async def delete(self, session_id: UUID):
         try:
             await self.collection.delete_one({"session_id": str(session_id)})
         except Exception as e:
-            logger.error(f"ERROR: cannot remove session: {e}")
+            logger.error(f"Cannot remove session: {e}")
             raise HTTPException(status_code=500, detail="Internal Server Error")
     
     def ensure_ttl_index(self):
@@ -63,7 +63,7 @@ class MongoDBBackend(SessionBackend):
             # Crea un índice en expiration_time con un TTL de 0 segundos.
             self.collection.create_index("expiration_time", expireAfterSeconds=0)
         except Exception as e:
-            logger.error(f"ERROR: cannot create TTL index: {e}")
+            logger.error(f"Cannot create TTL index: {e}")
             raise HTTPException(status_code=500, detail="Error al configurar índice TTL")
 
 
@@ -93,21 +93,21 @@ class CookieBackend:
         try:
             response.set_cookie(key=self.cookie_name, value=str(session_id), httponly=True)
         except Exception as e:
-            logger.error(f"ERROR: cannot write cookie: {e}")
+            logger.error(f"Cannot write cookie: {e}")
             raise HTTPException(status_code=404, detail="Session not found or expired")
 
     def read(self, request) -> UUID:
         try: 
             return UUID(request.cookies.get(self.cookie_name))
         except Exception as e:
-            logger.error(f"ERROR: cannot read cookie: {e}")
+            logger.error(f"Cannot read cookie: {e}")
             raise HTTPException(status_code=404, detail="Session not found or expired")
 
     def delete(self, response: Response):
         try:
             response.delete_cookie(self.cookie_name)
         except Exception as e:
-            logger.error(f"ERROR: cannot remove cookie: {e}")
+            logger.error(f"Cannot remove cookie: {e}")
             raise HTTPException(status_code=404, detail="Session not found or expired")
         
 
@@ -125,8 +125,8 @@ class SessionMiddleware(BaseHTTPMiddleware):
         request.state.session = None
 
         # Rutas que no deben requerir autenticación o sesión
-        excluded_paths = ["/static", "/templates", "/"]
-        if any(request.url.path.startswith(path) for path in excluded_paths):
+        session_required_paths = ["/chat", "/end_session", "/update_session"]
+        if not any(request.url.path.startswith(path) for path in session_required_paths):
             return await call_next(request)
         
         session_id = request.cookies.get("session_id")  # Acceso a la cookie de sesión
@@ -136,9 +136,10 @@ class SessionMiddleware(BaseHTTPMiddleware):
         if session_id:
             # Verificar y cargar la sesión desde MongoDB
             session = await self.mongo_backend.read(session_id)
-            logger.info("ID DE SESSIÓN EN LA SESIÓN RECUPERADA: "+session.session_id)
             if session:
                 # Verificar si la sesión ha expirado
+                if session.expiration_time.tzinfo is None:
+                    session.expiration_time = session.expiration_time.replace(tzinfo=timezone.utc)
                 if session.expiration_time < datetime.now(timezone.utc):
                     await self.mongo_backend.delete(session_id)
                     response = Response("Session expired", status_code=401)
@@ -148,10 +149,10 @@ class SessionMiddleware(BaseHTTPMiddleware):
                 # Asignar la sesión al request.state
                 request.state.session = session
             else:
-                logger.error("ERROR: Session not found in session backend or session backend is down")
+                logger.error("Session not found in session backend or session backend is down")
                 return Response("Session not found", status_code=404)
         else:
-            logger.error("ERROR: session_id not found in cookies")
+            logger.error("session_id not found in cookies")
             return Response("Session not found", status_code=401)
 
         response = await call_next(request)

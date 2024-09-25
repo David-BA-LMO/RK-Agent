@@ -7,6 +7,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from session_manager import SessionData, MongoDBBackend, CustomSessionVerifier, CookieBackend, SessionMiddleware
 from src.router_chain import Router_chain
 from pydantic import BaseModel, UUID4
+from typing import Dict
 import os
 from dotenv import load_dotenv
 from pathlib import Path
@@ -23,10 +24,14 @@ logging.basicConfig(handlers=[file_handler, console_handler], level=logging.INFO
 logger = logging.getLogger(__name__)
 
 
-# Modelo de datos JSON que recibe _chat() y _end_session()
+# Modelo de datos JSON que recibe _chat()
 class ChatRequest(BaseModel):
     user_input: str
 
+# Modelo de datos JSON que recibe _update_session()
+class ChatUpdateRequest(BaseModel):
+    user_input: str
+    bot_response: str
 
 # ------CLASE DE INICIO------
 class MainApp:
@@ -85,6 +90,10 @@ class MainApp:
         @self.app.post("/chat")
         async def chat(chat_request: ChatRequest, request: Request):
             return await self._chat(chat_request.user_input, request) # Interacción con el chatbot
+        
+        @self.app.post("/update_session")
+        async def update_session(chat_request: ChatUpdateRequest, request: Request):
+            return await self._update_session(chat_request.user_input, chat_request.bot_response, request) # Interacción con el chatbot
 
         @self.app.post("/end_session")
         async def end_session(response: Response, session_id: UUID = Depends(self.cookie_backend.read)):
@@ -105,7 +114,7 @@ class MainApp:
 
 
     # -----INICIO DE SESIÓN------
-    async def _start_session(self, response: Response):
+    async def _start_session(self, response: Response) -> Dict[str, str]:
         # Crear una nueva sesión con un ID único
         session_id = uuid4()
         current_time = datetime.now(timezone.utc) # Se obtiene la hora actual
@@ -119,7 +128,7 @@ class MainApp:
                 "new_search": True,
                 "result": None
             }, 
-            last_active=datetime.now(timezone.utc), # Establece el instante de inicio de la sesión
+            last_active=current_time, # Establece el instante de inicio de la sesión
             expiration_time=current_time + self.session_timeout # Establece el tiempo de expiración de la sesión
         )
         await self.mongo_backend.create(session_data) # Creamos la sesión en la base de datos
@@ -128,8 +137,8 @@ class MainApp:
         return {"session_id": str(session_id)} # Se recibe el id_session en el lado del cliente en formato JSON
 
 
-    #------MANEJO DE INTERACCIÓNES USUARIO-CHATBOT------
-    async def _chat(self, user_input: str, request: Request):
+    #------ENVÍO DE MENSAJES AL CHATBOT------
+    async def _chat(self, user_input: str, request: Request) -> StreamingResponse:
 
         logger.info("INFO: New message from session with id:" + request.cookies.get("session_id"))
 
@@ -137,43 +146,53 @@ class MainApp:
         try:
             session = request.state.session
         except HTTPException as e:
-            logger.error(f"ERROR: We cannot retrive session with id:" + request.cookies.get("session_id")+ str(e))
+            logger.error(f"We cannot retrive session with id:" + request.cookies.get("session_id")+ str(e))
             raise HTTPException(status_code=404, detail=f"Session not found or expired: {e}")
 
         # Generador de respuestas del chatbot en tiempo real
-        chatbot_response = ""
         async def response_stream():
             try:
-                nonlocal chatbot_response
                 # Generación la respuesta del chatbot. Es posible que en cada llamada se generen múltiples mensajes
                 async for partial_response in self.router_chain.execute(user_input, session):
                     yield partial_response
-                    chatbot_response += partial_response
             except Exception as e:
-                logger.error(f"ERROR: Logic execute failed {e}")
-                chatbot_response = "ERROR: Logic execute failed." + str(e)
+                logger.error(f"Logic execute failed {e}")
                 yield "ERROR: Logic failed: " + str(e)
-            
+
+        return StreamingResponse(response_stream(), media_type="text/plain")
+
+    
+    #------ACTUALIZACIÓN DE LA SESIÓN------
+    async def _update_session(self, user_input:str, bot_response: str, request: Request):
+
+        # Verificar si la sesión existe en la colección de sesiones del backend de MongoDB
+        try:
+            session = request.state.session
+        except HTTPException as e:
+            logger.error(f"We cannot retrive session with id:" + request.cookies.get("session_id")+ str(e))
+            raise HTTPException(status_code=404, detail=f"Session not found or expired: {e}")
+        
         # Actualización de la sesión después de completar la generación de la respuesta
         try:
-            # Dentro del objeto de datos de la sesión, se añade la conversación. Cada entrada es un diccionario con el mensaje del usuario, la respuesta del chatbot y la marca de tiempo
-            conversation_entry = {"user": user_input, "bot": chatbot_response, "timestamp": datetime.now(timezone.utc)}
+            # Dentro del objeto de datos de la sesión, se añade la conversación.
+            conversation_entry = {
+                "user": user_input, 
+                "bot": bot_response, 
+                "timestamp": datetime.now(timezone.utc)
+            }
             session.history.append(conversation_entry)
             session.last_active = datetime.now(timezone.utc) # Se actualiza el instante de la última interacción
             session.expiration_time = session.last_active + self.session_timeout
             await self.mongo_backend.update(session.session_id, session)
         except Exception as e:
-            logger.error(f"ERROR: Session update failed: {e}")
+            logger.error(f"Session update failed: {e}")
             return "ERROR: Session update failed: " + str(e)    
-
-        return StreamingResponse(response_stream(), media_type="text/plain")
 
 
     #------CIERRE DE SESIÓN------  
     async def _end_session(self, response: Response, session_id: UUID):
         try:
             await self.mongo_backend.delete(session_id) # Eliminamos la sesión del backend
-            self.session_router_chain.pop(str(session_id), None) # Eliminamos la lógica de la sesión CAMBIAR ESTO
             self.cookie_backend.delete(response) # Eliminar la cookie de la respuesta
             logger.info("INFO: Session removed with id:" + str(session_id))
         except Exception as e:

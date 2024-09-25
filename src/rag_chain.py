@@ -5,6 +5,7 @@ from langchain_openai import OpenAIEmbeddings
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import PromptTemplate
 from src.utilities import *
+from typing import AsyncGenerator
 from src.directories import RAG_CHAIN_PROMPT_dir, DB_DIR
 from src.config.base_models import generate_rag_llm
 
@@ -33,6 +34,6 @@ class RagChain:
 
 
     # FUNCIÓN PARA REALIZAR UNA CONSULTA RAG
-    async def query_rag(self, input: str, history: str) -> str:
-        response = await self.rag_chain.ainvoke({"input": input, "history": history})
-        return response
+    async def query_rag(self, input: str, history: str) -> AsyncGenerator[str, None]:
+        async for message in self.rag_chain.astream({"input": input, "history": history}):
+            yield message

@@ -136,19 +136,19 @@ class QAChain:
         try:
             return self.db.run(sql_query) 
         except OperationalError as op_err:
-            logger.error(f"ERROR: OperationalError during SQL execution: {op_err}")
+            logger.error(f"OperationalError during SQL execution: {op_err}")
             raise Exception(status_code=500, detail="ERROR: Operational error during SQL execution.")
         except IntegrityError as int_err:
-            logger.error(f"ERROR: IntegrityError during SQL execution: {int_err}")
+            logger.error(f"IntegrityError during SQL execution: {int_err}")
             raise Exception(status_code=500, detail="ERROR: Integrity constraint violated during SQL execution.")
         except TimeoutError as timeout_err:
-            logger.error(f"ERROR: Timeout during SQL execution: {timeout_err}")
+            logger.error(f"Timeout during SQL execution: {timeout_err}")
             raise Exception(status_code=504, detail="ERROR: SQL execution timed out.")
         except SQLAlchemyError as sql_err:
-            logger.error(f"ERROR: General SQLAlchemy error during SQL execution: {sql_err}")
+            logger.error(f"General SQLAlchemy error during SQL execution: {sql_err}")
             raise Exception(status_code=500, detail="ERROR: A database error occurred during SQL execution.")
         except Exception as e:
-            logger.info("ERROR: SQL execution against database failed")
+            logger.info("SQL execution against database failed")
             raise Exception(status_code=500, detail=f"ERROR: SQL execution against database failed:" + str(e))
 
 
@@ -213,7 +213,7 @@ class QAChain:
         try:
             answer = await self.full_text2sql_chain.ainvoke(dict_prompt) # Esta cadena devuelve el la consulta SQL y los campos faltantes si los hubiera
         except Exception as e:
-            logger.info("ERROR: Text2SQL chain chain failed")
+            logger.info("ERROR: Text2SQL chain chain failed"+ str(e))
             raise Exception(status_code=500, detail="ERROR: Text2SQL chain failed:" + str(e))
         async with self.lock:
             session.qa_data["missing_fields"] = answer["missing_fields"]    # Actualización de "missing_fields" en sesión
@@ -271,7 +271,7 @@ class QAChain:
                 yield partial_answer
         # Si el cliente reclama una nueva búsqueda o que todavía no se ha completado la consulta: "new_search" = True.
         else:
-            info = self.generate_query(self, input = input, session = session)
+            info = await self.generate_query(input, session)
             async for partial_answer in self.route(info = info, input = input, session = session, history = history):
                 yield partial_answer
 
