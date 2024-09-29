@@ -2,6 +2,7 @@ from fastapi import FastAPI, Depends, HTTPException, Response, Request
 from fastapi.responses import StreamingResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from uuid import uuid4, UUID
+import uuid
 from datetime import datetime, timedelta, timezone
 from motor.motor_asyncio import AsyncIOMotorClient
 from session_manager import SessionData, MongoDBBackend, CustomSessionVerifier, CookieBackend, SessionMiddleware
@@ -91,10 +92,6 @@ class MainApp:
         async def chat(chat_request: ChatRequest, request: Request):
             return await self._chat(chat_request.user_input, request) # Interacción con el chatbot
         
-        @self.app.post("/update_session")
-        async def update_session(chat_request: ChatUpdateRequest, request: Request):
-            return await self._update_session(chat_request.user_input, chat_request.bot_response, request) # Interacción con el chatbot
-
         @self.app.post("/end_session")
         async def end_session(response: Response, session_id: UUID = Depends(self.cookie_backend.read)):
             return await self._end_session(response, session_id)
@@ -126,7 +123,7 @@ class MainApp:
                 "missing_fields": [],
                 "last_query": None, 
                 "new_search": True,
-                "result": None
+                "result": ""
             }, 
             last_active=current_time, # Establece el instante de inicio de la sesión
             expiration_time=current_time + self.session_timeout # Establece el tiempo de expiración de la sesión
@@ -140,44 +137,42 @@ class MainApp:
     #------ENVÍO DE MENSAJES AL CHATBOT------
     async def _chat(self, user_input: str, request: Request) -> StreamingResponse:
 
-        logger.info("INFO: New message from session with id:" + request.cookies.get("session_id"))
+        session_id = request.cookies.get("session_id")
+        logger.info(f"New message from session with id: {session_id}")
 
         # Verificar si la sesión existe en la colección de sesiones del backend de MongoDB
         try:
             session = request.state.session
         except HTTPException as e:
-            logger.error(f"We cannot retrive session with id:" + request.cookies.get("session_id")+ str(e))
+            logger.error(f"We cannot retrive session with id: {session_id}"+ str(e))
             raise HTTPException(status_code=404, detail=f"Session not found or expired: {e}")
 
         # Generador de respuestas del chatbot en tiempo real
         async def response_stream():
             try:
+                complete_response = ""
                 # Generación la respuesta del chatbot. Es posible que en cada llamada se generen múltiples mensajes
                 async for partial_response in self.router_chain.execute(user_input, session):
+                    complete_response += partial_response
                     yield partial_response
             except Exception as e:
                 logger.error(f"Logic execute failed {e}")
                 yield "ERROR: Logic failed: " + str(e)
+            await self.update_session(session, user_input, complete_response)
 
         return StreamingResponse(response_stream(), media_type="text/plain")
 
     
     #------ACTUALIZACIÓN DE LA SESIÓN------
-    async def _update_session(self, user_input:str, bot_response: str, request: Request):
-
-        # Verificar si la sesión existe en la colección de sesiones del backend de MongoDB
-        try:
-            session = request.state.session
-        except HTTPException as e:
-            logger.error(f"We cannot retrive session with id:" + request.cookies.get("session_id")+ str(e))
-            raise HTTPException(status_code=404, detail=f"Session not found or expired: {e}")
+    async def update_session(self, session: SessionData, input:str, complete_response: str):
         
+        logger.info("QUERY GUARDADA EN SESIÓN: " + str(session.qa_data["last_query"]))
         # Actualización de la sesión después de completar la generación de la respuesta
         try:
             # Dentro del objeto de datos de la sesión, se añade la conversación.
             conversation_entry = {
-                "user": user_input, 
-                "bot": bot_response, 
+                "user": input, 
+                "bot": complete_response, 
                 "timestamp": datetime.now(timezone.utc)
             }
             session.history.append(conversation_entry)

@@ -2,7 +2,7 @@ import os
 import re
 import asyncio
 from sqlalchemy.exc import OperationalError, IntegrityError, SQLAlchemyError
-from langchain_core.runnables import RunnableLambda, RunnableParallel
+from langchain_core.runnables import RunnableLambda
 from langchain_community.utilities.sql_database import SQLDatabase
 from langchain_core.output_parsers import StrOutputParser
 from langchain.output_parsers import BooleanOutputParser
@@ -84,13 +84,7 @@ class QAChain:
         self.check_query = RunnableLambda(lambda x: self.check_fields_in_query(x))
 
         # Indicamos el diccionario que debería devolver
-        self.route_check_query_chain = RunnableParallel({
-            "sql_query": lambda x: x["sql_query"],
-            "missing_fields": self.check_query
-        })
-
-        # Esta cadena devuelve la consulta SQL y la lista de campos requeridos faltantes 
-        self.full_text2sql_chain = self.text2sql_chain | self.route_check_query_chain
+        self.route_check_query_chain = self.text2sql_chain | self.check_query
 
         # Cadena cuando falta en la consulta SQL alguno de los campos requeridos 
         self.missing_fields_chain = self.check_query_prompt | self.check_llm | StrOutputParser()
@@ -103,18 +97,20 @@ class QAChain:
     def check_fields_in_query(self, info: Dict) -> List[str]:
         self.last_query = info["sql_query"]
         query = info["sql_query"]
-        missing_fields_list = []
+        fields_in_query = []
+        try:
+            if self.required_fields:
+                # Encuentra todos los campos en la consulta
+                fields_in_query = re.findall(r'\b\w+\b', query.lower())
+                
+                # Filtra los campos de la consulta que NO están en self.missing_fields
+                fields_not_in_missing = [field for field in self.required_fields if field.lower() not in fields_in_query]
+            else:
+                fields_not_in_missing = []
+        except Exception as e:
+            logger.error("Cannot check missing fields: "+str(e))
         
-        if self.required_fields:
-            # Verifica que todos los campos requeridos estén en la consulta
-            fields_in_query = re.findall(r'\b\w+\b', query.lower())
-            
-            # Filtra y mantiene solo los campos que están en la lista de requeridos
-            missing_fields_list = [field for field in self.required_fields if field.lower() not in fields_in_query]
-        
-        self.missing_fields = missing_fields_list
-        logger.info("MISSING FIELDS:"+' '.join(self.missing_fields))
-        return missing_fields_list
+        return {"sql_query": query, "missing_fields": fields_not_in_missing}
     
 
     # Función para tratar la consuta SQL que devuelve el LLM
@@ -128,7 +124,7 @@ class QAChain:
         if cleaned_query.startswith("sql"):
             cleaned_query = cleaned_query[3:].strip()
 
-        return cleaned_query
+        return {"sql_query": cleaned_query}
     
 
     #-----EJECUCIÓN CONTRA LA BASE DE DATOS------
@@ -164,10 +160,10 @@ class QAChain:
         Devuelve un generador asincrónico.
         """
         result = ""
-        if not any(field in info["missing_fields"] for field in self.required_fields):
+        if not info["missing_fields"]:
             # Ejecutamos la consulta SQL
             yield "loading-db:start"
-            result = self.execute_query(self, info["sql_query"])
+            result = self.execute_query(info["sql_query"])
 
             # Actualizamos la sesión
             async with self.lock:
@@ -175,9 +171,10 @@ class QAChain:
                     session.qa_data["result"] = result # Actualización de "result" en sesión
                     text_sql = {"input": input, "sql": info["sql_query"]}
                     session.qa_data["sql_queries"].append(text_sql) # Actualización de "sql_queries" en sesión
+            logger.info("RESULTADO: "+ str(result))
+            logger.info("RESULTADO EN SESIÓN: "+str(session.qa_data["result"]))
 
             # Respondemos
-            yield "loading-db:end"
             async for partial_message in self.answer_result(input, history, session):
                 yield partial_message
         # Si existen campos faltantes avisamos al usuario de la necesidad de aportar más información
@@ -186,7 +183,7 @@ class QAChain:
                 answer = await self.missing_fields_chain.ainvoke({"input": input, "missing_fields": info["missing_fields"]}) # Indicamos al cliente que faltan campos en la consulta SQL
                 yield answer
             except Exception as e:
-                logger.info("ERROR: 'missing fields' chain failed")
+                logger.error("'missing fields' chain failed")
 
     
 
@@ -195,7 +192,7 @@ class QAChain:
         """
         Esta función genera la consulta SQL tomando estos parámetros:
             - input(str): input del cliente.
-            - last_query (str, optional): consulta realizada previamente. No tiene por qué haber sido ejecutada. Recogida de la sesión.
+            - last_query (Dict): cláusulas WHERE de la consulta realizada previamente. No tiene por qué haber sido ejecutada. Recogida de la sesión.
         Devuelve un diccionario con dos valores:
             - missing_fields(List): campos faltantes necesarios para ejecutar la consulta SQL
             - sql_query(str): consulta SQL.
@@ -203,21 +200,22 @@ class QAChain:
         self.open_db_connection()
         dict_prompt = self.dict_text2sql
         dict_prompt["input"] = input
-        last_query = ""
         if(session.qa_data["last_query"]!=None):
-            last_query = session.qa_data["last_query"]
-        dict_prompt["last_query"] = last_query
+            dict_prompt["last_query"] = str(session.qa_data["last_query"])
 
         answer = None
         # Generamos la consulta SQL
         try:
-            answer = await self.full_text2sql_chain.ainvoke(dict_prompt) # Esta cadena devuelve el la consulta SQL y los campos faltantes si los hubiera
+            logger.info("COMPLETE PROMPT "+ str(dict_prompt))
+            answer = await self.route_check_query_chain.ainvoke(dict_prompt) # Esta cadena devuelve el la consulta SQL y los campos faltantes si los hubiera
         except Exception as e:
-            logger.info("ERROR: Text2SQL chain chain failed"+ str(e))
+            logger.error("Text2SQL chain failed: "+ str(e))
             raise Exception(status_code=500, detail="ERROR: Text2SQL chain failed:" + str(e))
         async with self.lock:
+            logger.info("NUEVA QUERY: "+ answer["sql_query"])
             session.qa_data["missing_fields"] = answer["missing_fields"]    # Actualización de "missing_fields" en sesión
-            session.qa_data["last_query"] = answer["sql_query"]     # Actualización de "last_query" en sesión
+            logger.info("DICT DE CLAUSULAS: "+ str(extract_where_clauses(answer["sql_query"])))
+            session.qa_data["last_query"] = extract_where_clauses(answer["sql_query"])     # Actualización de "last_query" en sesión:
         return answer
 
 
@@ -231,18 +229,13 @@ class QAChain:
             - history (str): historial de conversación
         Devuelve un generador asincrónico.
         """
-        final_answer = ""
-        if(session.qa_data["result"]!=None):
-            try:
-                answer = await self.answer_chain.ainvoke({"input": input, "result": session.qa_data["result"], "history": history})
-                async for partial_answer in qa_format_text(answer):
-                    final_answer =+ partial_answer
-                    yield partial_answer
-            except Exception as e:
-                logger.info("ERROR: answer chain chain failed")
-                raise Exception(status_code=500, detail="ERROR: answer chain chain failed:" + str(e))
-            async with self.lock:
-                session.qa_data["result"] = final_answer # Actualización de "result" en sesión
+        try:
+            yield "loading-db:end"
+            async for partial_answer in self.answer_chain.astream({"input": input, "result": str(session.qa_data["result"]), "history": history}):
+                yield partial_answer
+        except Exception as e:
+            logger.error(f"ERROR: answer chain failed: {e}")
+            raise Exception(status_code=500, detail=f"ERROR: answer chain chain failed: {e}")
 
 
     # Función que enruta toda la herramienta QA
@@ -262,7 +255,7 @@ class QAChain:
             async with self.lock:
                 session.qa_data["new_search"] = new_search_answer   # Actualización de "new_search" en sesión
         except Exception as e:
-            logger.info("ERROR: 'checking new search' chain failed:")
+            logger.error(f"'checking new search' chain failed: {e}")
             raise Exception(status_code=500, detail="ERROR: 'checking new search' chain failed:" + str(e))
 
         # Si consulta ya se ha ejecutado: "new_search" = False.

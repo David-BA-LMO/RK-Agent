@@ -1,4 +1,8 @@
 let sessionId = null;
+let markdownBuffer = '';  // Buffer que almacena el markdown completo.
+let tempSpan = null;  // Variable para el span temporal.
+
+
 // ---------------------CALLBACKS---------------------
 // Lista de mensajes especiales que requieren un comportamiento específico
 const specialTags = {
@@ -46,17 +50,6 @@ document.getElementById('user-input').addEventListener('keydown', function(event
 });
 
 
-// --------------------- AGREGAR ELEMENTO ENLACE ---------------------
-// Función para devolver un enlace html a partir de una URL
-function createUrlLink(url) {
-    const link = document.createElement('a');
-    link.href = url;
-    link.textContent = url;
-    link.target = '_blank';  // Para que el enlace se abra en una nueva pestaña
-    return link;
-}
-
-
 // ---------------------FUNCIONALIDAD DEL CHATBOT---------------------
 // INICIO DE SESIÓN
 async function startSession() {
@@ -70,7 +63,7 @@ async function startSession() {
         console.error("Error al iniciar la sesión: ", error);
         const errorMessageDiv = createBotMessageContainer('bot');
         const chatContainer = document.getElementById("chat-container");
-        const targetDiv = errorMessageDiv.querySelector(".bot-message-content");
+        targetDiv = errorMessageDiv.querySelector(".bot-message-content");
         targetDiv.insertAdjacentHTML('beforeend', `Error: ${error.message}`);
         chatContainer.appendChild(errorMessageDiv);
     }
@@ -92,26 +85,9 @@ async function sendMessage(userInput) {
     document.getElementById("chat-container").appendChild(userMessageDiv);
 
     // 3. Creación del contenedor para el mensaje del bot
-    let messageDiv = createBotMessageContainer("bot");
+    messageDiv = createBotMessageContainer("bot");
     document.getElementById("chat-container").appendChild(messageDiv);
-    let targetDiv = messageDiv.querySelector(".bot-message-content");
-
-    /*
-    1 - Detectar cuándo comienza una etiqueta HTML con <.
-    2 - Crear un contenedor temporal <span id="temporal_id"> donde se mostrarán de forma instantánea los caracteres a medida que llegan.
-    3 - Detectar cuándo la etiqueta de apertura está completa (cuando se reciba >).
-    4 - A partir de ahí, continuar mostrando los caracteres dentro del span, pero también acumularlos en un buffer.
-    5 - Detectar cuándo se completa una etiqueta de cierre.
-    6 - Una vez que se completa la etiqueta de cierre, eliminar el span temporal y sustituir su contenido con el HTML completo renderizado.
-    */
-
-    // 4. Instanciar variables
-    let partialTag = ""; // Acumula fragmentos de HTML incompleto.
-    let accumulatedMessage = ""; // Buffer para el HTML completo.
-    let isInsideTag = false; // Indica si estamos dentro de una etiqueta HTML.
-    let insideTagBuffer = ""; // Acumula los caracteres de una etiqueta HTML.
-    let isRendering = false; // Indica si estamos mostrando un span temporal.
-    let botMessage = "";
+    targetDiv = messageDiv.querySelector(".bot-message-content");
 
     try {
         // 5. Solicitud de mensaje al backend
@@ -133,6 +109,7 @@ async function sendMessage(userInput) {
         // 7. Lectura del stream de datos
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
+        botMessage = ""
 
         // 8. Bucle de lectura mientras el stream reciba datos
         while (true) {
@@ -140,6 +117,7 @@ async function sendMessage(userInput) {
             if (done) break;
             let chunk = decoder.decode(value, { stream: true }); // Convertir datos binarios a texto.
             console.log("CHUNK: " + chunk);
+            botMessage+= chunk
 
             // 9. Bucle de lectura mientras el stream reciba datos
             const specialTagKeys = Object.keys(specialTags);
@@ -149,162 +127,91 @@ async function sendMessage(userInput) {
                     chunk = chunk.split(tag).join('');  // Eliminar el comando del chunk
                 }
             });
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-            // Procesar el chunk carácter por carácter
-            for (let i = 0; i < chunk.length; i++) {
-                const char = chunk[i];
-                botMessage+=char
-
-                // Si detectamos el inicio de una etiqueta "<"
-                if (char === "<") {
-                    isInsideTag = true;
-                    insideTagBuffer = "<";
-
-                    // Si no estamos renderizando, añadimos el span temporal
-                    if (!isRendering) {
-                        targetDiv.insertAdjacentHTML('beforeend', '<span id="temporal_id"></span>');
-                        isRendering = true;
-                    }
-                } else if (isInsideTag) {
-                    // Continuamos acumulando la etiqueta dentro del buffer
-                    insideTagBuffer += char;
-
-                    // Si encontramos el final de la etiqueta de apertura ">"
-                    if (char === ">") {
-                        isInsideTag = false;
-
-                        // Añadimos el contenido del buffer al HTML acumulado
-                        partialTag += insideTagBuffer;
-                        insideTagBuffer = "";
-
-                        // Terminamos de mostrar el contenido en el span temporal
-                        const tempSpan = document.getElementById("temporal_id");
-                        if (tempSpan) {
-                            tempSpan.insertAdjacentHTML('beforeend', partialTag);
-                        }
-                    }
-                } else {
-                    // Si estamos fuera de una etiqueta, mostramos el carácter directamente en el span
-                    const tempSpan = document.getElementById("temporal_id");
-                    if (tempSpan) {
-                        tempSpan.insertAdjacentHTML('beforeend', char);
-                    }
-
-                    // También acumulamos el mensaje completo
-                    partialTag += char;
-                }
-
-                // Detectar etiquetas de cierre
-                if (partialTag.includes("</")) {
-                    const closingTagIndex = partialTag.indexOf(">");
-                    if (closingTagIndex !== -1) {
-                        // Eliminar el span temporal y renderizar el HTML completo
-                        const tempSpan = document.getElementById("temporal_id");
-                        if (tempSpan) {
-                            tempSpan.remove();
-                        }
-
-                        // Añadir el HTML completo al DOM
-                        targetDiv.insertAdjacentHTML('beforeend', partialTag);
-                        partialTag = ""; // Resetear el buffer
-                        isRendering = false;
-                    }
-                }
-            }
+            // 10. Procesado del html
+            await renderize_html(chunk);
         }
-
-        // 12. Finalización del procesamiento
-        if (partialTag.trim() !== "") {  // En caso de que hayan quedado secciones de HTML sin renderizar
-            accumulatedMessage += partialTag;
-            partialTag = "";
-        }
-
+        scrollToBottom()
     } catch (error) {
         targetDiv.insertAdjacentHTML('beforeend', `Error: ${error.message}`);
-    } finally {
-        await updateSession(userInput, botMessage); // Enviar el mensaje completo para actualizar la sesión
-        console.log("MENSAJE COMPLETO: "+ botMessage)
+    }
+    finally {
+        await cleanTemporalSpan();
     }
 }
 
+//___________________________________________________________________
 
-    let inside_tag = false // Estamos procesando una etiqueta html
-    let creating_message = true // Estamos mostrando contenido sin renderizar el html
-    let tag_buffer= "" // código html de la etiqueta
-    let complete_html_message = ""
-    
-async function renderize_html(chunk){
-    
-    for (let i = 0; i < chunk.length; i++){
-        const char = chunk[i];
-        if(char ==="<"){
-            inside_tag = true
-            tag_buffer = "<"
-            for (let j = i; j < chunk.length; j++)
-                if(creating_message && chunk[i+1]=="<"){
-                    renderize_html(chunk[j])
-                }
-            if (!creating_message) {
-                targetDiv.insertAdjacentHTML('beforeend', '<span id="temporal_id"></span>');
-                creating_message = false;
-            }
-        } else if (inside_tag) {
-            tag_buffer+= char
-            if (char === ">") {
-                inside_tag = false;
-                complete_html_message+=tag_buffer
-                tag_buffer=""
-            }
-        } else {
+async function renderize_html(chunk) {
+    // Eliminar elementos markdown del chunk (simplificación)
+    const plainText = chunk.replace(/[#*_\[\]\(\)`]/g, '');
 
-        }
+    // Si no existe un span temporal, lo creamos.
+    if (!tempSpan) {
+        tempSpan = document.createElement('span');
+        tempSpan.className = 'temp-span';
+        targetDiv.appendChild(tempSpan);
+    }
+
+    // Insertamos el texto plano en el span temporal.
+    tempSpan.innerText += plainText;
+
+    // Añadimos el chunk completo (con markdown) al buffer.
+    markdownBuffer += chunk;
+
+    // Verificamos si hemos llegado al final de una estructura markdown.
+    if (isCompleteMarkdown(markdownBuffer)) {
+        // Si el markdown está completo, renderizamos el HTML final.
+        renderFinalHTML();
     }
 }
 
-
-// ACTUALIZACIÓN DE LA SESIÓN
-async function updateSession(userInput, botResponse) {
-    try {
-        const response = await fetch('/update_session', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                user_input: userInput,
-                bot_response: botResponse 
-            }),
-        });
-
-        if (!response.ok) {
-            const errorData = await response.json();
-            console.error("ERROR: API response error", errorData.detail);
-            return;
-        }
-
-        console.log("Sesión actualizada con éxito");
-    } catch (error) {
-        console.error("Error al actualizar la sesión:", error);
-    }
+// Detectar si el markdown está completo.
+function isCompleteMarkdown(buffer) {
+    // Aquí definimos los criterios para determinar si el bloque markdown está completo.
+    // Por ejemplo, puedes verificar por saltos de línea dobles o cierres de etiquetas markdown.
+    const closingTags = ['\n\n', '</ul>', '</ol>', '</h1>', '</h2>', '</p>'];
+    return closingTags.some(tag => buffer.includes(tag));
 }
+
+// Función para eliminar el span temporal y sustituirlo por el contenido renderizado.
+function renderFinalHTML() {
+    if (tempSpan) {
+        // Eliminamos el span temporal.
+        targetDiv.removeChild(tempSpan);
+        tempSpan = null;
+    }
+
+    // Convertimos el contenido markdown acumulado en HTML usando marked.js
+    const renderedHTML = marked.parse(markdownBuffer);
+
+    // Insertamos el HTML renderizado en el targetDiv.
+    targetDiv.innerHTML += renderedHTML;
+
+    // Limpiamos el buffer después de renderizar.
+    markdownBuffer = '';
+
+    scrollToBottom();
+}
+
+async function cleanTemporalSpan() {
+    tempSpan = null;
+    markdownBuffer = "";
+    // Selecciona todos los elementos con la clase 'temp-span'
+    const tempSpans = document.querySelectorAll('span.temp-span');
+
+    // Itera sobre cada elemento encontrado
+    tempSpans.forEach(tempSpan => {
+        // Crea un nuevo elemento <p>
+        const pElement = document.createElement('p');
+        
+        // Copia el contenido del <span> en el nuevo <p>
+        pElement.innerHTML = tempSpan.innerHTML;
+        
+        // Reemplaza el <span> con el nuevo <p>
+        tempSpan.parentNode.replaceChild(pElement, tempSpan);
+    });
+}
+//___________________________________________________________________
 
 // ESTRUCTURA DEL CONTENEDOR DEL MENSAJE DEL USUARIO
 function createUserMessageContainer(messageContent) {
@@ -346,6 +253,8 @@ function createBotMessageContainer() {
     // Añadir el contenedor del logo y el contenedor del mensaje a messageDiv
     messageDiv.appendChild(logoContainer);
     messageDiv.appendChild(messageContent);
+
+    scrollToBottom()
 
     return messageDiv;
 }
