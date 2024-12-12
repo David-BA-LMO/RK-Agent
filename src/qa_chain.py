@@ -6,6 +6,7 @@ from langchain_core.runnables import RunnableLambda
 from langchain_community.utilities.sql_database import SQLDatabase
 from langchain_core.output_parsers import StrOutputParser
 from langchain.output_parsers import BooleanOutputParser
+from langchain_core.example_selectors import SemanticSimilarityExampleSelector
 from langchain_core.prompts import PromptTemplate
 from langchain_core.messages import AIMessage
 from typing import Dict, AsyncGenerator, List
@@ -20,7 +21,6 @@ from src.directories import (
     db_name,
 )
 from src.config.base_models import generate_qa_llm, generate_check_llm
-from src.format_answer import qa_format_text
 import logging
 
 
@@ -57,6 +57,18 @@ class QAChain:
         self.db = None
         self._dialect = None
         self._table_info = None
+
+        # FEW-SHOTS
+        example_selector = SemanticSimilarityExampleSelector.from_examples(
+            # This is the list of examples available to select from.
+            examples,
+            # This is the embedding class used to produce embeddings which are used to measure semantic similarity.
+            OpenAIEmbeddings(),
+            # This is the VectorStore class that is used to store the embeddings and do a similarity search over.
+            Chroma,
+            # This is the number of examples to produce.
+            k=1,
+        )
 
         # PROMPTS
         self.text2sql_prompt = PromptTemplate.from_template(GENERATE_SQL_QUERY_PROMPT) # Prompt para la tarea text2sql
@@ -270,10 +282,7 @@ class QAChain:
 
 
     def open_db_connection(self):
-        """
-        Asegura que la conexión a la base de datos está abierta. Si no lo está, la abre.
-        También cachea `table_info` y `dialect` después de la primera conexión.
-        """
+        
         if self.db is None:
             self.db = SQLDatabase.from_uri(f"sqlite:///{self.database_path}", sample_rows_in_table_info=4)
             

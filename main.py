@@ -2,7 +2,6 @@ from fastapi import FastAPI, Depends, HTTPException, Response, Request
 from fastapi.responses import StreamingResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from uuid import uuid4, UUID
-import uuid
 from datetime import datetime, timedelta, timezone
 from motor.motor_asyncio import AsyncIOMotorClient
 from session_manager import SessionData, MongoDBBackend, CustomSessionVerifier, CookieBackend, SessionMiddleware
@@ -15,6 +14,11 @@ from pathlib import Path
 import logging
 from logging.handlers import RotatingFileHandler
 from src.directories import welcome_message
+import sys
+
+current_script_path = os.path.abspath(__file__)
+app_directory_path = os.path.dirname(os.path.dirname(current_script_path))
+sys.path.append(app_directory_path)
 
 
 # Configuración del logger con rotación (limitados). 20000 bytes y 5 archivos de respaldo máximos
@@ -166,7 +170,6 @@ class MainApp:
     #------ACTUALIZACIÓN DE LA SESIÓN------
     async def update_session(self, session: SessionData, input:str, complete_response: str):
         
-        logger.info("QUERY GUARDADA EN SESIÓN: " + str(session.qa_data["last_query"]))
         # Actualización de la sesión después de completar la generación de la respuesta
         try:
             # Dentro del objeto de datos de la sesión, se añade la conversación.
@@ -193,7 +196,11 @@ class MainApp:
         except Exception as e:
             logger.error(f"Failed to end session with id: {session_id}, error: {str(e)}")
             raise HTTPException(status_code=500, detail="Failed to end session due to an internal error")
+        
+
 
 # Iniciar la aplicación
 main_app = MainApp()
 app = main_app.app
+
+

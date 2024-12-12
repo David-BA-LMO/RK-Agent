@@ -116,7 +116,6 @@ async function sendMessage(userInput) {
             const { done, value } = await reader.read();
             if (done) break;
             let chunk = decoder.decode(value, { stream: true }); // Convertir datos binarios a texto.
-            console.log("CHUNK: " + chunk);
             botMessage+= chunk
 
             // 9. Bucle de lectura mientras el stream reciba datos
