@@ -18,3 +18,11 @@ fastapi-sessions
 motor
 uvicorn[standard]
 sqlalchemy
+sqlglot
+redis
+pydantic[email]
+beanie
+twilio
+python-multipart
+opencage
+apscheduler

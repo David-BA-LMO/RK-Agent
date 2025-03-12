@@ -1,64 +1,19 @@
-let sessionId = null;
-let markdownBuffer = '';  // Buffer que almacena el markdown completo.
+import callbacks_functions from './callbacks.js';
+import { createUserMessageContainer, createBotMessageContainer } from './messages.js';
+
+let tempImageUrls = []; // Variable temporal para almacenar las imágenes recibidas
+let markdownBuffer = '';  // Buffer que almacena el markdown csompleto.
 let tempSpan = null;  // Variable para el span temporal.
-
-
-// ---------------------CALLBACKS---------------------
-// Lista de mensajes especiales que requieren un comportamiento específico
-const specialTags = {
-    "loading-db:start": handleLoadingDbStart, // Arranque de la animación de carga para búsquedas en la base de datos
-    "loading-db:end": handleLoadingDbEnd,  // Fin de la animación de carga para búsquedas en la base de datos
-};
-
-// Función para manejar "loading-db:start"
-function handleLoadingDbStart() {
-    const chatContainer = document.getElementById('chat-container');
-    //Contenedor de la animación de carga
-    const div = document.createElement('div');
-    div.id = 'loading-div';
-
-    // Crear el mensaje de carga
-    const text = document.createElement('p');
-    text.id = 'loading-text';
-    text.textContent = "Buscando tu piso ideal...";
-    div.appendChild(text);
-
-    // Añadir una animación de tipo spinning
-    const spinner = document.createElement('span');
-    spinner.id = 'loading-spinner';
-    div.appendChild(spinner);
-
-    chatContainer.appendChild(div);
-}
-
-// Función para manejar "loading-db:end"
-function handleLoadingDbEnd() {
-    // Eliminar el div de animación de carga
-    const div = document.getElementById('loading-div');
-    if (div) {
-        div.remove();
-    }
-}
-
-
-// --------------------- ENVÍO DEL MENSAJE CON ENTER ---------------------
-document.getElementById('user-input').addEventListener('keydown', function(event) {
-    const input = document.getElementById('user-input').value;
-    if (event.key === 'Enter' && input.trim() !== '') {
-        sendMessage(input);
-    }
-});
-
+let targetDiv = null;
 
 // ---------------------FUNCIONALIDAD DEL CHATBOT---------------------
 // INICIO DE SESIÓN
 async function startSession() {
     try {
-        const response = await fetch('/start_session', {
+        const response = await fetch('/login', {
             method: 'POST'
         });
         const data = await response.json();
-        sessionId = data.session_id;  // Guardamos el session_id pasado al crear la sesión
     } catch (error) {
         console.error("Error al iniciar la sesión: ", error);
         const errorMessageDiv = createBotMessageContainer('bot');
@@ -69,34 +24,47 @@ async function startSession() {
     }
 }
 
-// ENVÍO Y RECEPCIÓN DE MENSAJES
-async function sendMessage(userInput) {
-
-    // 1. Validación inicial
-    if (!sessionId) {
-        console.error("Session ID is missing.");
-        return;
-    }
+// ENVÍO DE MENSAJE DE TEXTO 
+async function sendUserMessage(userInput) {
     if (userInput.trim() === "") return;
 
-    // 2. Mostrar el mensaje del usuario
+    // Limpiar el campo de entrada del usuario
     document.getElementById("user-input").value = "";
-    const userMessageDiv = createUserMessageContainer(userInput);
-    document.getElementById("chat-container").appendChild(userMessageDiv);
+    
+    // Crear y mostrar el mensaje del usuario en la interfaz
+    createUserMessageContainer(userInput);
 
-    // 3. Creación del contenedor para el mensaje del bot
-    messageDiv = createBotMessageContainer("bot");
-    document.getElementById("chat-container").appendChild(messageDiv);
-    targetDiv = messageDiv.querySelector(".bot-message-content");
+    // Crear la estructura del mensaje para enviar al backend
+    const messageData = {
+        type: "text",
+        content: userInput
+    };
 
+    // Llamar a processMessage con los datos generados
+    processMessage(messageData);
+}
+
+
+// PROCESADO DE DATOS EN BACKEND
+async function processMessage(messageData) {
     try {
+
+        if (!messageData){
+            return
+        }
+
+        // Crear el contenedor del mensaje del bot en la interfaz
+        let messageDiv = createBotMessageContainer("bot");
+        document.getElementById("chat-container").appendChild(messageDiv);
+        targetDiv = messageDiv.querySelector(".bot-message-content");
+
         // 5. Solicitud de mensaje al backend
         const response = await fetch('/chat', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify({ user_input: userInput }),
+            body: JSON.stringify(messageData),
         });
 
         // 6. Validación de la solicitud
@@ -109,25 +77,100 @@ async function sendMessage(userInput) {
         // 7. Lectura del stream de datos
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
-        botMessage = ""
+        let botMessage = ""
 
         // 8. Bucle de lectura mientras el stream reciba datos
         while (true) {
-            const { done, value } = await reader.read();
+            const {done, value} = await reader.read();
             if (done) break;
-            let chunk = decoder.decode(value, { stream: true }); // Convertir datos binarios a texto.
-            botMessage+= chunk
 
-            // 9. Bucle de lectura mientras el stream reciba datos
-            const specialTagKeys = Object.keys(specialTags);
-            specialTagKeys.forEach(tag => {
-                if (chunk.includes(tag)) {
-                    specialTags[tag]();  // Ejecutar la función asociada al comando
-                    chunk = chunk.split(tag).join('');  // Eliminar el comando del chunk
+            let chunk = decoder.decode(value, { stream: true });
+
+            // 1. Dividir por líneas (cada línea debería ser un JSON chunk)
+            const lines = chunk.split("\n").filter(line => line.trim() !== "");
+            for (const line of lines) {
+                try {
+                    let data = ""
+                    try {
+                        data = JSON.parse(line);
+                    } catch (error) {
+                        console.error("Error al parsear JSON:", error.message);
+                        console.error("JSON recibido:", line);
+                    } // Parsear cada chunk como JSON
+
+                    if (data.type === "text") { // Ejecución de texto
+                        botMessage += data.content;
+                        await renderize_html(data.content);
+
+                    } else if (data.type === "image") { // Ejecución de imágenes (en URLs)
+                        const imageUrl = data.content;
+                        tempImageUrls.push(imageUrl)
+
+                    } else if (data.type === "function") { // Ejecución de funciones
+                        const functionName = data.content;
+                        const functionInput = data.input;
+                        
+                        if (typeof callbacks_functions[functionName] === "function") {
+                            if (functionInput !== undefined) {
+                                const result = callbacks_functions[functionName](targetDiv, functionInput);
+                                
+                                if (result instanceof Promise) { // Si la función devuelve una promesa, esperar el resultado
+                                    result.then(resolvedData => {
+                                        console.log(resolvedData)
+                                        processMessage(resolvedData); // Llamar recursivamente con el resultado
+                                    }).catch(error => {
+                                        console.error('Error en la ejecución de la función:', error);
+                                    });
+                                } else if (result) {
+                                    processMessage(result);
+                                }
+                            } else {
+                                const result = callbacks_functions[functionName](targetDiv);
+                                
+                                if (result instanceof Promise) { // Si la función devuelve una promesa, esperar el resultado
+                                    result.then(resolvedData => {
+                                        processMessage(resolvedData); // Llamar recursivamente con el resultado
+                                    }).catch(error => {
+                                        console.error('Error en la ejecución de la función:', error);
+                                    });
+                                } else if (result) {
+                                    processMessage(result);
+                                }
+                            }
+                        } else {
+                            console.error(`La función '${functionName}' no está definida.`);
+                        }
+                    } else if (data.type === "coord") { // Ejecución de un mapa de posición
+                        const [lon, lat] = data.content;
+            
+                        const mapDiv = document.createElement("div");
+                        mapDiv.className = "map-container";
+                        targetDiv.appendChild(mapDiv);
+            
+                        const map = L.map(mapDiv).setView([lat, lon], 13);
+            
+                        // Agregar una capa de mapa base (OpenStreetMap)
+                        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                            attribution: '© OpenStreetMap contributors'
+                        }).addTo(map);
+            
+                        // Agregar un marcador en las coordenadas especificadas
+                        L.marker([lat, lon]).addTo(map)
+                            .bindPopup(`Ubicación: ${lat}, ${lon}`)
+                            .openPopup();
+                    
+                    } else if (data.type == "html"){
+
+                    }
+                } catch (error) {
+                    console.error("Failed to parse chunk as JSON:", error);
                 }
-            });
-            // 10. Procesado del html
-            await renderize_html(chunk);
+            }
+        }
+        if(tempImageUrls.length>0){
+            console.log(tempImageUrls)
+            callbacks_functions.generateImageCarrousel(targetDiv, tempImageUrls);
+            tempImageUrls = []
         }
         scrollToBottom()
     } catch (error) {
@@ -210,58 +253,11 @@ async function cleanTemporalSpan() {
         tempSpan.parentNode.replaceChild(pElement, tempSpan);
     });
 }
-//___________________________________________________________________
-
-// ESTRUCTURA DEL CONTENEDOR DEL MENSAJE DEL USUARIO
-function createUserMessageContainer(messageContent) {
-    // Crear el div del mensaje del usuario
-    const messageDiv = document.createElement("div");
-    messageDiv.classList.add("message", "user"); // Añadir las clases "message" y "user"
-
-    // Crear el nodo de texto para el mensaje del usuario
-    const textNode = document.createTextNode(messageContent);
-
-    // Añadir el texto al contenedor del mensaje
-    messageDiv.appendChild(textNode);
-
-    return messageDiv;
-}
-
-// ESTRUCTURA DEL CONTENEDOR DEL MENSAJE DEL BOT
-function createBotMessageContainer() {
-    const messageDiv = document.createElement("div");
-    messageDiv.classList.add("message", "bot");
-
-    // Crear el contenedor del logo
-    const logoContainer = document.createElement("div");
-    logoContainer.classList.add("bot-logo-container");
-
-    // Crear la imagen del logo
-    const logo = document.createElement("img");
-    logo.src = "static/bot-logo.png";
-    logo.alt = "Bot logo";
-    logo.classList.add("bot-logo");
-
-    // Añadir la imagen del logo al contenedor
-    logoContainer.appendChild(logo);
-
-    // Crear el contenedor del mensaje
-    const messageContent = document.createElement("div");
-    messageContent.classList.add("bot-message-content");
-
-    // Añadir el contenedor del logo y el contenedor del mensaje a messageDiv
-    messageDiv.appendChild(logoContainer);
-    messageDiv.appendChild(messageContent);
-
-    scrollToBottom()
-
-    return messageDiv;
-}
 
 
 // DESPLAZARSE AL FINAL DEL CONTENEDOR DE CHAT
 function scrollToBottom() {
-    const chatContainer = document.getElementById("chat-container");
+    const chatContainer = getLastBotMessageContent();
     chatContainer.scrollTop = chatContainer.scrollHeight;
 }
 
@@ -289,15 +285,24 @@ async function fetchWelcomeMessage() {
         const errorMessageDiv = createBotMessageContainer();
         const chatContainer = document.getElementById("chat-container");
         const targetDiv = errorMessageDiv.querySelector(".bot-message-content");
-
-        // Añadir el mensaje de error al div correspondiente
         targetDiv.insertAdjacentHTML('beforeend', "Error: Could not load welcome message.");
-
-        // Añadir el contenedor de error al chat
         chatContainer.appendChild(errorMessageDiv);
     }
 }
 
+// FUNCIÓN PARA LOCALIZAR EL MENSAJE BOT MÁS RECIENTE
+function getLastBotMessageContent() {
+    const elements = document.querySelectorAll('.bot-message-content');
+    return elements.length > 0 ? elements[elements.length - 1] : null;
+}
+
+// EVENTO AL MODIFICAR EL TAMAÑO DEL NAVEGADOR
+window.addEventListener('resize', function () {
+    const lastDiv = getLastBotMessageContent();
+    if (lastDiv && tempImageUrls.length>0) {
+        callbacks_functions.generateImageCarrousel(lastDiv, tempImageUrls);
+    }
+});
 
 // ARRANCAR EL CHATBOT
 async function initiateSession() {
@@ -307,4 +312,22 @@ async function initiateSession() {
 
 
 // CARGA DE LA WEB
-document.addEventListener('DOMContentLoaded', initiateSession);
+document.addEventListener("DOMContentLoaded", () => {
+    initiateSession(); // Inicia la sesión
+
+    // Selecciona el botón y el input
+    const sendButton = document.querySelector("#send-button");
+    const userInput = document.querySelector("#user-input");
+
+    // Agrega evento de click para enviar el mensaje
+    sendButton.addEventListener("click", () => {
+        sendUserMessage(userInput.value);
+    });
+
+    // También permitir enviar el mensaje al presionar "Enter"
+    userInput.addEventListener("keypress", (event) => {
+        if (event.key === "Enter") {
+            sendUserMessage(userInput.value);
+        }
+    });
+});

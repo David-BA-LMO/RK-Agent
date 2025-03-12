@@ -18,6 +18,15 @@ body {
     box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
 }
 
+#logo {
+    position: absolute;
+    top: 10px;
+    left: 20px;
+    width: 160px; /* Ajusta el tamaño según sea necesario */
+    height: auto;
+    z-index: 1000; /* Asegura que esté sobre otros elementos */
+}
+
 /* Estilos específicos para pantallas más grandes (escritorio) */
 @media (min-width: 768px) {
     #main-container {
@@ -166,4 +175,155 @@ body {
 .bot-message-content {
     display: flex;
     flex-direction: column;
+}
+
+/*------MAPA DE LOCALIZACIONES------*/
+.map-container {
+    width: 100%;
+    height: 400px; /* Altura ajustada a 400px */
+    margin: 10px auto; /* Centrado horizontalmente con auto */
+    display: flex;
+    justify-content: center; /* Centra el contenido horizontalmente */
+    align-items: center; /* Centra el contenido verticalmente */
+    background-color: #f0f0f0; /* Opcional: color de fondo para mejor visibilidad */
+    border: 4px solid #ccc; /* Opcional: borde para distinguir el mapa */
+    border-radius: 8px;
+}
+
+/*------CARRUSEL DE IMÁGENES------*/
+/* Estilos para el contenedor principal del carrusel */
+.carousel-container {
+    position: relative;
+    overflow: hidden;
+    width: 100%;
+    height: auto; /* Se ajustará dinámicamente desde JS */
+    border: 4px solid #ccc;
+    border-radius: 8px;
+}
+
+/* Estilos para la pista de imágenes */
+.image-track {
+    display: flex;
+    transition: transform 0.5s ease;
+    width: auto; /* Se ajustará dinámicamente desde JS */
+    height: 100%;
+}
+
+/* Estilos para las imágenes dentro del carrusel */
+.image-track img {
+    width: 100%; /* Se ajustará dinámicamente desde JS */
+    height: 100%;
+    object-fit: cover;
+}
+
+/* Estilos para los botones de navegación */
+.carousel-button {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 10;
+    background: rgba(0, 0, 0, 0.5);
+    color: white;
+    border: none;
+    padding: 10px;
+    cursor: pointer;
+    font-size: 18px;
+    border-radius: 50%;
+    user-select: none;
+}
+
+.carousel-button:hover {
+    background: rgba(0, 0, 0, 0.8);
+}
+
+.carousel-button--prev {
+    left: 10px;
+}
+
+.carousel-button--next {
+    right: 10px;
+}
+
+/* FORMULARIO DE DATOS PERSONALES
+/* Estilo general del formulario */
+.book-form {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 50%;
+    max-width: 50%;
+    margin: 0 auto;
+    padding: 20px;
+    border: 4px solid #ccc;
+    border-radius: 8px;
+    background-color: #f9f9f9;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+/* Estilo de las etiquetas */
+.book-form label {
+    font-size: 0.8rem;
+    color: #333;
+}
+
+/* Estilo de los campos de entrada */
+.book-form input {
+    font-size: 0.6rem;
+    padding: 6px 10px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    outline: none;
+    transition: border-color 0.3s ease;
+}
+
+/* Efecto hover y foco en los campos de entrada */
+.book-form input:focus {
+    border-color: #007BFF;
+    box-shadow: 0 0 5px rgba(0, 123, 255, 0.5);
+}
+
+/* Estilo del botón de envío */
+.book-form .submit-button {
+    font-size: 1rem;
+    font-weight: bold;
+    padding: 10px 15px;
+    margin: 5% 20%;
+    background-color: #007BFF;
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+/* Efectos hover y activo en el botón de envío */
+.book-form .submit-button:hover {
+    background-color: #0056b3;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+}
+
+.book-form .submit-button:active {
+    background-color: #003f7f;
+}
+
+/* Estilo para mensajes de validación nativos del navegador */
+.book-form input:invalid {
+    border-color: #dc3545;
+}
+
+.book-form input:invalid:focus {
+    box-shadow: 0 0 5px rgba(220, 53, 69, 0.5);
+}
+
+/* Responsive: Ajustar tamaño en pantallas más pequeñas */
+@media (max-width: 480px) {
+    .book-form {
+        padding: 15px;
+        font-size: 0.9rem;
+    }
+
+    .book-form .submit-button {
+        padding: 8px 12px;
+        font-size: 0.9rem;
+    }
 }

@@ -1,20 +1,22 @@
-# Usa una imagen base oficial de Python
 FROM python:3.9-slim
 
-# Establece el directorio de trabajo en el contenedor. No se refiere al directorio en la aplicación local
 WORKDIR /app
 
-# Copia el archivo de requisitos a la imagen del contenedor
+# Instalar dependencias del sistema (incluye SpatiaLite)
+RUN apt-get update && apt-get install -y \
+    libsqlite3-mod-spatialite \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt .
 
-# Instala las dependencias necesarias
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copia el contenido de la aplicación al contenedor
 COPY . .
 
-# Expone el puerto en el que la aplicación correrá
 EXPOSE 8000
 
+# Especificar variable de entorno para que SQLite encuentre SpatiaLite
+ENV SPATIALITE_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu/mod_spatialite.so"
+
 # Comando para ejecutar la aplicación
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "info"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "debug", "--reload"]

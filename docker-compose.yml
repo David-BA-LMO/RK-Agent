@@ -1,32 +1,15 @@
-#version: '3.8'
-
 services:
-# Contexto de la aplicación
-  app:
+  rk-chatbot:
     build: .
-    image: chatbot:latest
-    environment:
-      - MONGO_URI=${MONGO_URI} # Indica nombre del servicio mongo, puerto y nombre de la base de datos
-      - SECRET_KEY=${SECRET_KEY}  # Clave secreta para JWT
-      - SESSION_TIMEOUT=${SESSION_TIMEOUT}  # Tiempo de sesión en minutos
-    ports:
-      - "8000:8000" # Puertas de acceso al contenedor
-    depends_on:
-      - mongo
+    image: rk-chatbot-image
+    container_name: rk-chatbot
     volumes:
       - .:/app
-
-# Contexto de la base de datos
-  mongo:
-    image: mongo:4.4
-    container_name: mongo # Nombre del contenedor
     ports:
-      - "27017:27017" # Puertas de acceso al contenedor
-    volumes:
-      - mongo_data:/data/db
+      - "8000:8000"
     environment:
-      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
-      MONGO_PASSWORD: ${MONGO_PASSWORD}
-      
-volumes:
-  mongo_data:
+      - PYTHONUNBUFFERED=1
+      - SPATIALITE_LIBRARY_PATH=${SPATIALITE_LIBRARY_PATH}
+    env_file:
+      - .env  # 🔹 Cargar variables de entorno desde .env
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --log-level debug --reload
